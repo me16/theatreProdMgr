@@ -1,0 +1,57 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isMember(productionId) {
+      return exists(/databases/$(database)/documents/productions/$(productionId)/members/$(request.auth.uid));
+    }
+    function isOwner(productionId) {
+      return get(/databases/$(database)/documents/productions/$(productionId)/members/$(request.auth.uid)).data.role == 'owner';
+    }
+    function isSuperAdmin() {
+      return request.auth.token.superadmin == true;
+    }
+
+    match /users/{uid} {
+      allow read, write: if request.auth.uid == uid;
+      allow read: if isSuperAdmin();
+    }
+
+    // collectionGroup query: lets users find their own member docs across all productions
+    // Allows reading member docs where email matches the authenticated user's email,
+    // OR where the doc ID matches the user's UID
+    match /{path=**}/members/{memberId} {
+      allow read: if request.auth != null
+        && (memberId == request.auth.uid || resource.data.email == request.auth.token.email);
+    }
+
+    match /productions/{productionId} {
+      allow read: if isMember(productionId) || isSuperAdmin();
+      allow create: if request.auth != null;
+      allow update: if isOwner(productionId) || isSuperAdmin();
+      allow delete: if isOwner(productionId) || isSuperAdmin();
+
+      match /members/{uid} {
+        allow read: if isMember(productionId) || isSuperAdmin();
+        allow write: if isOwner(productionId) || isSuperAdmin();
+      }
+      match /props/{propId} {
+        allow read: if isMember(productionId) || isSuperAdmin();
+        allow write: if isOwner(productionId) || isSuperAdmin();
+      }
+      match /propNotes/{propId} {
+        allow read: if isMember(productionId) || isSuperAdmin();
+        allow write: if isOwner(productionId) || isSuperAdmin();
+      }
+      match /zones/{pageKey} {
+        allow read: if isMember(productionId) || isSuperAdmin();
+        allow write: if isOwner(productionId) || isSuperAdmin();
+      }
+      match /lineNotes/{noteId} {
+        allow read: if isMember(productionId) || isSuperAdmin();
+        allow create: if isMember(productionId) && request.resource.data.uid == request.auth.uid;
+        allow update, delete: if resource.data.uid == request.auth.uid || isOwner(productionId) || isSuperAdmin();
+      }
+    }
+  }
+}

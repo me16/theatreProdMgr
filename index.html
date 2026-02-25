@@ -8,7 +8,77 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;700&family=Instrument+Serif&family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@400;600;700&display=swap" rel="stylesheet" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-  <style>/* ===== RESET & BASE ===== */
+  <style>
+  :root {
+    --gold: #d4af37; --gold-light: #e8c84a; --gold-glow: rgba(212,175,55,0.15);
+    --bg-deep: #0a0a14; --bg-base: #0f0f1e; --bg-card: #141428;
+    --bg-raised: #1a1a2e; --bg-border: #242438; --bg-hover: #1e1e34;
+    --text-primary: #e8e8f0; --text-secondary: #9090a8; --text-muted: #555570;
+    --red: #e63946; --green: #2d8a4e; --blue: #5b9bd4;
+    --ln-bg: #0f0e0c; --ln-card: #1a1916; --ln-border: #2e2c29;
+    --ln-gold: #c8a96e; --ln-text: #e8e4dc; --ln-muted: #5c5850;
+  }
+  .app-topbar { display:flex; align-items:center; height:52px; background:var(--bg-base); border-bottom:1px solid var(--bg-border); padding:0 16px; flex-shrink:0; gap:12px; }
+  .app-topbar-logo { font-family:"Instrument Serif",serif; font-size:22px; color:var(--gold); letter-spacing:3px; cursor:pointer; padding-right:16px; border-right:1px solid var(--bg-border); }
+  .app-topbar-logo:hover { opacity:0.75; }
+  .app-topbar-title { font-family:"Playfair Display",serif; font-size:15px; color:var(--text-secondary); max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .app-tabbar { display:flex; background:var(--bg-base); border-bottom:1px solid var(--bg-border); padding:0 8px; flex-shrink:0; }
+  .app-tab { height:42px; padding:0 22px; background:none; border:none; border-bottom:2px solid transparent; color:var(--text-muted); font-size:13px; font-weight:500; cursor:pointer; transition:all 0.2s; }
+  .app-tab:hover { color:var(--text-secondary); }
+  .app-tab--active { color:var(--gold); border-bottom-color:var(--gold); }
+  .app-tab-content { flex:1; overflow:hidden; position:relative; display:flex; flex-direction:column; }
+  .tab-panel { display:none; flex:1; overflow:hidden; flex-direction:column; }
+  .tab-panel--active { display:flex; }
+  .topbar-btn { background:none; border:1px solid var(--bg-border); color:var(--text-muted); font-size:12px; padding:5px 12px; border-radius:4px; cursor:pointer; transition:all 0.2s; }
+  .topbar-btn:hover { border-color:var(--gold); color:var(--gold); }
+  .cast-tab-content { flex:1; overflow-y:auto; padding:24px; }
+  .cast-header-row { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; }
+  .cast-add-btn { background:var(--gold); color:#0a0a14; border:none; padding:7px 16px; border-radius:5px; font-size:13px; font-weight:600; cursor:pointer; }
+  .cast-add-btn:hover { background:var(--gold-light); }
+  .cast-table { width:100%; border-collapse:collapse; font-size:13px; }
+  .cast-table th { text-align:left; color:var(--text-muted); font-size:11px; text-transform:uppercase; letter-spacing:1px; padding:6px 10px; border-bottom:1px solid var(--bg-border); }
+  .cast-table td { padding:10px; border-bottom:1px solid var(--bg-border); vertical-align:middle; }
+  .cast-member-name { font-weight:600; color:var(--text-primary); }
+  .cast-member-email { font-family:"DM Mono",monospace; font-size:11px; color:var(--text-muted); }
+  .cast-characters { display:flex; flex-wrap:wrap; gap:4px; }
+  .char-chip { display:inline-flex; align-items:center; gap:4px; background:var(--bg-raised); border:1px solid var(--bg-border); border-radius:20px; padding:2px 8px; font-size:11px; color:var(--text-secondary); }
+  .char-chip-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+  .cast-actions { white-space:nowrap; }
+  .cast-action-btn { background:none; border:1px solid var(--bg-border); color:var(--text-secondary); font-size:11px; padding:3px 10px; border-radius:4px; cursor:pointer; margin-right:4px; }
+  .cast-action-btn:hover { border-color:var(--gold); color:var(--gold); }
+  .cast-action-btn--danger:hover { border-color:var(--red); color:var(--red); }
+  .cast-modal { position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:500; display:none; align-items:center; justify-content:center; }
+  .cast-modal.open { display:flex; }
+  .cast-modal-card { background:var(--bg-card); border:1px solid var(--bg-border); border-radius:10px; padding:28px; width:100%; max-width:500px; max-height:90vh; overflow-y:auto; }
+  .cast-modal-field { margin-bottom:14px; }
+  .cast-modal-field label { display:block; font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:5px; }
+  .char-chips-editor { display:flex; flex-wrap:wrap; gap:6px; min-height:28px; padding:4px 0; margin-bottom:6px; }
+  .char-chip-editable { display:inline-flex; align-items:center; gap:4px; background:var(--bg-raised); border:1px solid var(--bg-border); border-radius:20px; padding:3px 8px; font-size:12px; color:var(--text-secondary); }
+  .chip-remove { background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:14px; line-height:1; padding:0 2px; }
+  .char-chip-add-row { display:flex; align-items:center; gap:6px; }
+  .color-grid { display:flex; flex-wrap:wrap; gap:8px; }
+  .color-swatch { width:26px; height:26px; border-radius:50%; cursor:pointer; border:2px solid transparent; }
+  .color-swatch--selected { border-color:#fff; box-shadow:0 0 0 3px rgba(255,255,255,0.15); }
+  .cast-picker { position:relative; }
+  .cast-picker-input { width:100%; }
+  .cast-picker-dropdown { position:absolute; top:100%; left:0; right:0; background:var(--bg-card); border:1px solid var(--bg-border); border-radius:6px; box-shadow:0 8px 24px rgba(0,0,0,0.4); max-height:200px; overflow-y:auto; display:none; z-index:100; margin-top:2px; }
+  .cast-picker-dropdown.open { display:block; }
+  .cast-picker-option { padding:8px 12px; cursor:pointer; font-size:13px; color:var(--text-secondary); }
+  .cast-picker-option:hover { background:var(--bg-hover); color:var(--text-primary); }
+  .opt-char { font-size:10px; color:var(--text-muted); font-family:"DM Mono",monospace; margin-top:2px; }
+  .settings-content { flex:1; overflow-y:auto; padding:28px; max-width:680px; }
+  .settings-section { background:var(--bg-card); border:1px solid var(--bg-border); border-radius:8px; padding:20px; margin-bottom:16px; }
+  .settings-section h3 { font-size:11px; text-transform:uppercase; letter-spacing:2px; color:var(--text-muted); margin-bottom:14px; padding-bottom:10px; border-bottom:1px solid var(--bg-border); }
+  .settings-field { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .settings-field input, .settings-field select { flex:1; min-width:180px; }
+  .settings-btn { background:none; border:1px solid var(--bg-border); color:var(--text-secondary); padding:6px 14px; border-radius:4px; font-size:12px; cursor:pointer; }
+  .settings-btn:hover { border-color:var(--gold); color:var(--gold); }
+  .settings-btn--primary { background:var(--gold); border-color:var(--gold); color:#0a0a14; font-weight:600; }
+  .settings-btn--primary:hover { background:var(--gold-light); }
+  .settings-btn--danger:hover { border-color:var(--red); color:var(--red); }
+  .join-code-box { font-family:"DM Mono",monospace; font-size:20px; letter-spacing:4px; background:var(--bg-raised); border:1px solid var(--bg-border); border-radius:6px; padding:8px 16px; color:var(--text-primary); }
+  .join-code-box--inactive { opacity:0.4; }
+  /* ===== RESET & BASE ===== */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; overflow: hidden; }
     body {
@@ -190,13 +260,13 @@
     .app-header .gear-btn:hover { color: #d4af37; }
 
     /* ===== PROPS TABS ===== */
-    .props-tabs { display: flex; border-bottom: 1px solid #2a2a3e; background: #12122a; flex-shrink: 0; }
-    .props-tab {
+    .props-subtabs { display: flex; border-bottom: 1px solid #2a2a3e; background: #12122a; flex-shrink: 0; }
+    .props-subtab {
       padding: 10px 24px; background: none; border: none; color: #888; font-size: 13px; font-weight: 500;
       border-bottom: 2px solid transparent; transition: all 0.2s;
     }
-    .props-tab:hover { color: #ccc; }
-    .props-tab--active { color: #d4af37; border-bottom-color: #d4af37; }
+    .props-subtab:hover { color: #ccc; }
+    .props-subtab--active { color: #d4af37; border-bottom-color: #d4af37; }
     .props-content { flex: 1; overflow-y: auto; padding: 24px; }
 
     /* ===== PROP FORM ===== */
@@ -818,31 +888,35 @@
 
   <!-- Main app view -->
   <div id="app-view">
-    <div class="app-header">
-      <span class="logo" id="app-back-logo">CUE</span>
-      <span class="prod-title" id="app-prod-title"></span>
-      <span class="role-badge" id="app-role-badge"></span>
-      <div class="spacer"></div>
-      <button class="app-header-btn app-header-btn--accent" id="open-linenotes-btn">Line Notes</button>
-      <button class="app-header-btn gear-btn hidden" id="open-settings-btn" title="Production Settings">⚙</button>
-      <button class="app-header-btn" id="app-logout-btn">Sign Out</button>
+    <!-- Top Bar -->
+    <div class="app-topbar">
+      <span class="app-topbar-logo" id="app-back-logo">CUE</span>
+      <span class="app-topbar-title" id="app-prod-title"></span>
+      <span class="role-badge app-topbar-badge" id="app-role-badge"></span>
+      <div class="app-topbar-spacer" style="flex:1"></div>
+      <button class="topbar-btn" id="app-logout-btn">Sign Out</button>
     </div>
-    <div class="props-tabs" id="props-tabs">
-      <button class="props-tab props-tab--active" data-tab="manage">Manage Props</button>
-      <button class="props-tab" data-tab="view">View Show</button>
-      <button class="props-tab" data-tab="check">Pre/Post Check</button>
+    <!-- Tab Bar -->
+    <div class="app-tabbar">
+      <button class="app-tab app-tab--active" data-tab="props">Props</button>
+      <button class="app-tab" data-tab="linenotes">Line Notes</button>
+      <button class="app-tab" data-tab="cast">Cast &amp; Crew</button>
+      <button class="app-tab" data-tab="settings">Settings</button>
     </div>
-    <div class="props-content" id="props-content"></div>
-  </div>
-
-  <!-- Production settings panel -->
-  <div id="production-backdrop"></div>
-  <div id="production-panel"></div>
-
-<!-- Line Notes overlay -->
-  <div id="linenotes-overlay">
+    <!-- Tab Content Area -->
+    <div class="app-tab-content">
+      <!-- PROPS TAB -->
+      <div class="tab-panel tab-panel--active" id="tab-props">
+        <div class="props-subtabs" id="props-subtabs">
+          <button class="props-subtab props-subtab--active" data-subtab="manage">Manage Props</button>
+          <button class="props-subtab" data-subtab="view">View Show</button>
+          <button class="props-subtab" data-subtab="check">Pre/Post Check</button>
+        </div>
+        <div class="props-content" id="props-content"></div>
+      </div>
+      <!-- LINE NOTES TAB -->
+      <div class="tab-panel" id="tab-linenotes">
     <div class="ln-header">
-      <button class="back-btn" id="ln-back-btn">← Back</button>
       <span class="ln-logo">CUE</span>
       <span class="show-name" id="ln-show-name"></span>
       <div class="ln-spacer"></div>
@@ -862,7 +936,7 @@
       <!-- SIDEBAR (notes view) -->
       <div class="ln-sidebar" id="ln-sidebar">
         <div class="ln-sidebar-section">
-          <h5>Cast <button id="ln-add-char-btn" style="float:right;background:none;border:none;color:#5c5850;cursor:pointer;font-size:16px;line-height:1;">+</button></h5>
+          <h5>Cast</h5>
           <div id="ln-cast-list"></div>
         </div>
         <div class="ln-sidebar-section">
@@ -962,6 +1036,17 @@
         </div>
       </div>
     </div>
+  
+      </div>
+      <!-- CAST & CREW TAB -->
+      <div class="tab-panel" id="tab-cast">
+        <div class="cast-tab-content" id="cast-content"></div>
+      </div>
+      <!-- SETTINGS TAB -->
+      <div class="tab-panel" id="tab-settings">
+        <div class="settings-content" id="settings-content"></div>
+      </div>
+    </div>
   </div>
 
   <!-- POPOVER -->
@@ -977,6 +1062,7 @@
   </div>
 
   <!-- Character modal -->
+  <div class="cast-modal" id="cast-modal"></div>
   <div class="char-modal" id="char-modal"></div>
 
   <!-- Send notes modal -->

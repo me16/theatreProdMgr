@@ -9,6 +9,7 @@ import {
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { httpsCallable } from 'firebase/functions';
 import { showApp, hideApp } from '../props/props.js';
+import { resetLineNotes } from '../linenotes/linenotes.js';
 import { isOwner } from '../shared/roles.js';
 
 const dashView = document.getElementById('dashboard-view');
@@ -122,6 +123,7 @@ async function openProduction(id, prod, role) {
 
 export function backToDashboard() {
   cleanup();
+  resetLineNotes();
   state.activeProduction = null;
   state.activeRole = null;
   hideApp();

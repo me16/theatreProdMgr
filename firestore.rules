@@ -52,6 +52,11 @@ service cloud.firestore {
         allow create: if isMember(productionId) && request.resource.data.uid == request.auth.uid;
         allow update, delete: if resource.data.uid == request.auth.uid || isOwner(productionId) || isSuperAdmin();
       }
+      // Cast & Crew subcollection — added for CUE UI overhaul
+      match /cast/{castId} {
+        allow read: if isMember(productionId) || isSuperAdmin();
+        allow create, update, delete: if isOwner(productionId) || isSuperAdmin();
+      }
     }
   }
 }

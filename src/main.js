@@ -4,16 +4,20 @@ import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { state, cleanup } from './shared/state.js';
 import { initLogin, showLogin, hideLogin } from './auth/login.js';
 import { initDashboard, showDashboard, hideDashboard } from './dashboard/dashboard.js';
-import { initProductionPanel } from './production/production.js';
 import { initProps, hideApp } from './props/props.js';
-import { initLineNotes } from './linenotes/linenotes.js';
+import { initLineNotes, resetLineNotes } from './linenotes/linenotes.js';
+import { initCast } from './cast/cast.js';
+import { initSettings } from './settings/settings.js';
+import { initTabs } from './shared/tabs.js';
 
 // Initialize all modules
 initLogin();
 initDashboard();
-initProductionPanel();
 initProps();
 initLineNotes();
+initCast();
+initSettings();
+initTabs();
 
 // Auth state listener
 onAuthStateChanged(auth, async (user) => {
@@ -26,8 +30,8 @@ onAuthStateChanged(auth, async (user) => {
     state.activeRole = null;
     hideDashboard();
     hideApp();
-    // Close Line Notes overlay if open
-    document.getElementById('linenotes-overlay').classList.remove('open');
+    resetLineNotes();
+    document.getElementById('app-view').style.display = 'none';
     showLogin();
     return;
   }

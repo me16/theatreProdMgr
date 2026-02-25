@@ -7,8 +7,7 @@ import {
   collection, doc, addDoc, updateDoc, deleteDoc, onSnapshot,
   serverTimestamp
 } from 'firebase/firestore';
-import { openPanel } from '../production/production.js';
-import { openLineNotes } from '../linenotes/linenotes.js';
+import { buildCastPicker, getCastMembers, subscribeToCast } from '../cast/cast.js';
 
 let props = [];
 let propNotes = {};
@@ -31,32 +30,29 @@ const appView = document.getElementById('app-view');
 const content = document.getElementById('props-content');
 
 export function initProps() {
-  document.getElementById('props-tabs').addEventListener('click', e => {
-    const tab = e.target.closest('.props-tab');
+  document.getElementById('props-subtabs').addEventListener('click', e => {
+    const tab = e.target.closest('.props-subtab');
     if (!tab) return;
-    const tabName = tab.dataset.tab;
+    const tabName = tab.dataset.subtab;
     if (tabName === 'manage' && !isOwner()) {
       toast('Only owners can manage props.', 'error');
       return;
     }
     setActiveTab(tabName);
   });
-  document.getElementById('open-settings-btn').addEventListener('click', openPanel);
-  document.getElementById('open-linenotes-btn').addEventListener('click', openLineNotes);
-  document.getElementById('app-logout-btn').addEventListener('click', () => auth.signOut());
 }
 
 function setActiveTab(tab) {
   activeTab = tab;
-  document.querySelectorAll('.props-tab').forEach(t =>
-    t.classList.toggle('props-tab--active', t.dataset.tab === tab)
+  document.querySelectorAll('.props-subtab').forEach(t =>
+    t.classList.toggle('props-subtab--active', t.dataset.subtab === tab)
   );
-  const manageTab = document.querySelector('.props-tab[data-tab="manage"]');
+  const manageTab = document.querySelector('.props-subtab[data-subtab="manage"]');
   if (!isOwner()) {
-    manageTab.classList.add('hidden');
+    manageTab?.classList.add('hidden');
     if (tab === 'manage') activeTab = 'view';
   } else {
-    manageTab.classList.remove('hidden');
+    manageTab?.classList.remove('hidden');
   }
   renderContent();
 }
@@ -68,23 +64,25 @@ export function showApp() {
   const badge = document.getElementById('app-role-badge');
   badge.textContent = state.activeRole;
   badge.className = 'role-badge role-badge--' + state.activeRole;
-  const settingsBtn = document.getElementById('open-settings-btn');
-  settingsBtn.classList.toggle('hidden', !isOwner());
   // Stop any running timer from previous production
   stopTimer();
   props = []; propNotes = {}; currentPage = 1;
   preChecked = {}; postChecked = {};
   editingPropId = null; cueRows = [];
   subscribeToProps();
+  subscribeToCast();
+  // Reset to props tab inline (avoids circular import with tabs.js)
+  document.querySelectorAll('.app-tab').forEach(btn =>
+    btn.classList.toggle('app-tab--active', btn.dataset.tab === 'props')
+  );
+  document.querySelectorAll('.tab-panel').forEach(panel =>
+    panel.classList.toggle('tab-panel--active', panel.id === 'tab-props')
+  );
   setActiveTab(isOwner() ? 'manage' : 'view');
 }
 
 export function hideApp() {
   appView.style.display = 'none';
-  // Close any open overlays
-  document.getElementById('linenotes-overlay').classList.remove('open');
-  document.getElementById('production-panel').classList.remove('open');
-  document.getElementById('production-backdrop').classList.remove('open');
   // Remove any lingering modals
   document.querySelectorAll('.prop-notes-modal').forEach(m => m.remove());
 }
@@ -107,6 +105,7 @@ function subscribeToProps() {
 }
 
 function renderContent() {
+  if (!document.getElementById('tab-props')?.classList.contains('tab-panel--active')) return;
   switch (activeTab) {
     case 'manage': renderManageTab(); break;
     case 'view': renderViewTab(); break;
@@ -184,8 +183,26 @@ function renderManageTab() {
 
   content.querySelector('#add-cue-btn').addEventListener('click', () => {
     syncCueRowsFromDOM();
-    cueRows.push({ enterPage: '', exitPage: '', exitLocation: 'SL', carrierOn: '', carrierOff: '' });
+    cueRows.push({ enterPage: '', exitPage: '', exitLocation: 'SL', carrierOn: '', carrierOff: '', carrierOnCastId: '', carrierOffCastId: '' });
     renderContent();
+  });
+
+  // Wire cast pickers for carrier fields
+  content.querySelectorAll('.cue-row').forEach((row, i) => {
+    const conInput = row.querySelector('.cue-con');
+    const coffInput = row.querySelector('.cue-coff');
+    buildCastPicker(conInput, (sel) => {
+      if (cueRows[i]) {
+        cueRows[i].carrierOn = sel ? sel.castName : '';
+        cueRows[i].carrierOnCastId = sel ? (sel.castId || '') : '';
+      }
+    }, cueRows[i]?.carrierOn || '');
+    buildCastPicker(coffInput, (sel) => {
+      if (cueRows[i]) {
+        cueRows[i].carrierOff = sel ? sel.castName : '';
+        cueRows[i].carrierOffCastId = sel ? (sel.castId || '') : '';
+      }
+    }, cueRows[i]?.carrierOff || '');
   });
   content.querySelector('#save-prop-btn').addEventListener('click', saveProp);
   content.querySelector('#cancel-edit-btn')?.addEventListener('click', () => {
@@ -213,8 +230,7 @@ function syncCueRowsFromDOM() {
       cueRows[i].enterPage = row.querySelector('.cue-enter').value;
       cueRows[i].exitPage = row.querySelector('.cue-exit').value;
       cueRows[i].exitLocation = row.querySelector('.cue-loc').value;
-      cueRows[i].carrierOn = row.querySelector('.cue-con').value;
-      cueRows[i].carrierOff = row.querySelector('.cue-coff').value;
+      // carrierOn/Off are kept in sync via picker callbacks
     }
   });
 }
@@ -231,7 +247,9 @@ async function saveProp() {
     exitPage: parseInt(c.exitPage) || 0,
     exitLocation: c.exitLocation || 'SL',
     carrierOn: sanitizeName(c.carrierOn),
+    carrierOnCastId: c.carrierOnCastId || '',
     carrierOff: sanitizeName(c.carrierOff),
+    carrierOffCastId: c.carrierOffCastId || '',
   }));
   for (let i = 0; i < cues.length; i++) {
     if (!cues[i].enterPage || !cues[i].exitPage) { toast('Cue #' + (i+1) + ': enter and exit pages required.', 'error'); return; }

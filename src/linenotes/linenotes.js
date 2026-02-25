@@ -8,6 +8,7 @@ import {
   serverTimestamp, query, where
 } from 'firebase/firestore';
 import { ref, getDownloadURL } from 'firebase/storage';
+import { getCastMembers } from '../cast/cast.js';
 
 /* ═══════════════════════════════════════════════════════════
    STATE
@@ -21,12 +22,15 @@ let currentView = 'notes'; // 'notes' | 'zones'
 let pdfScale = 1.4;
 let lineZones = {};        // pageKey → [{x,y,w,h,text,isCharName,isStageDirection}]
 let notes = [];
-let characters = [];       // {id, name, color, email}
+// Flat list rebuilt from cast roster on each tab activation
+// Shape: { id, castId, name (character), actorName, color, email }
+let flatChars = [];
 let activeCharIdx = 0;
 let activeNoteType = 'skp';
 let notesUnsub = null;
 let zoneSaveTimeout = null;
-let pdfFileName = '';
+// Whether the tab has been initialized for this production session
+let lnInitialized = false;
 
 // Zone editor state
 let zeSelectedIdx = null;
@@ -70,7 +74,6 @@ const COLORS = [
 /* ═══════════════════════════════════════════════════════════
    DOM REFS
    ═══════════════════════════════════════════════════════════ */
-const overlay        = document.getElementById('linenotes-overlay');
 const popoverEl      = document.getElementById('note-popover');
 const charModal      = document.getElementById('char-modal');
 const sendModal      = document.getElementById('send-notes-modal');
@@ -86,14 +89,12 @@ function pk()                   { return pageZoneKey(currentPage, currentHalf); 
    INIT + OPEN/CLOSE
    ═══════════════════════════════════════════════════════════ */
 export function initLineNotes() {
-  document.getElementById('ln-back-btn').addEventListener('click', closeLineNotes);
   document.getElementById('ln-prev-page').addEventListener('click', () => changePage(-1));
   document.getElementById('ln-next-page').addEventListener('click', () => changePage(1));
   document.getElementById('ln-split-btn').addEventListener('click', toggleSplitMode);
   document.getElementById('ln-view-notes-btn').addEventListener('click', () => switchView('notes'));
   document.getElementById('ln-view-zones-btn').addEventListener('click', () => switchView('zones'));
   document.getElementById('ln-send-btn').addEventListener('click', openSendNotes);
-  document.getElementById('ln-add-char-btn').addEventListener('click', openCharModal);
 
   // Notes view: rubber band on draw overlay
   document.getElementById('ln-draw-overlay').addEventListener('mousedown', notesDrawDown);
@@ -126,38 +127,62 @@ export function initLineNotes() {
   document.addEventListener('keydown', handleKeydown);
 }
 
-export function openLineNotes() {
-  overlay.classList.add('open');
-  document.getElementById('ln-show-name').textContent = state.activeProduction?.title || '';
+function buildFlatChars() {
+  const cast = getCastMembers();
+  flatChars = [];
+  cast.forEach(member => {
+    const chars = member.characters?.length > 0
+      ? member.characters
+      : [member.name]; // fallback: actor name as character
+    chars.forEach(charName => {
+      flatChars.push({
+        id: `${member.id}::${charName}`,  // stable composite key
+        castId: member.id,
+        name: charName,
+        actorName: member.name,
+        color: member.color || '#888',
+        email: member.email || '',
+      });
+    });
+  });
+  if (activeCharIdx >= flatChars.length) activeCharIdx = 0;
+}
 
-  // Show/hide zones tab for owners
-  document.getElementById('ln-view-zones-btn').classList.toggle('hidden', !isOwner());
-
-  currentView = 'notes';
-  currentPage = 1;
-  splitMode = false;
-  currentHalf = 'L';
-  notes = [];
-  lineZones = {};
-  pdfDoc = null;
-  totalPages = 0;
-  zeSelectedIdx = null;
-  zeMultiSelected.clear();
-  notesHoveredZoneIdx = null;
-  renderGen = 0;
-  zeRenderGen = 0;
-
-  loadCharacters();
-  subscribeToNotes();
-  loadScript();
-  switchView('notes');
+export function onLineNotesTabActivated() {
+  buildFlatChars();
+  if (!lnInitialized) {
+    lnInitialized = true;
+    currentView = 'notes';
+    currentPage = 1;
+    splitMode = false;
+    currentHalf = 'L';
+    notes = [];
+    lineZones = {};
+    pdfDoc = null;
+    totalPages = 0;
+    zeSelectedIdx = null;
+    zeMultiSelected.clear();
+    notesHoveredZoneIdx = null;
+    renderGen = 0;
+    zeRenderGen = 0;
+    document.getElementById('ln-view-zones-btn')
+      .classList.toggle('hidden', !isOwner());
+    document.getElementById('ln-show-name').textContent =
+      state.activeProduction?.title || '';
+    subscribeToNotes();
+    loadScript();
+    switchView('notes');
+  }
   renderSidebar();
 }
 
-function closeLineNotes() {
-  overlay.classList.remove('open');
-  closePopover();
+export function resetLineNotes() {
+  lnInitialized = false;
   if (notesUnsub) { notesUnsub(); notesUnsub = null; }
+  pdfDoc = null;
+  notes = [];
+  flatChars = [];
+  lineZones = {};
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -209,7 +234,6 @@ async function loadScript() {
     };
     pdfDoc = await loadingTask.promise;
     totalPages = pdfDoc.numPages;
-    pdfFileName = (state.activeProduction?.title || 'script').replace(/[^a-zA-Z0-9]/g, '_');
     document.getElementById('ln-total-pages').textContent = totalPages;
     if (!state.activeProduction.scriptPageCount && isOwner()) {
       try { await updateDoc(doc(db, 'productions', state.activeProduction.id), { scriptPageCount: totalPages }); } catch(e) {}
@@ -631,7 +655,7 @@ function notesActivateFocusedZone() {
    ═══════════════════════════════════════════════════════════ */
 function openPopover(e, pageNum, half, zoneIdx, zone) {
   e.stopPropagation();
-  if (characters.length === 0) { toast('Add a cast member first'); return; }
+  if (flatChars.length === 0) { toast('Add cast members first — go to Cast & Crew tab'); return; }
   pendingNote = { page: pageNum, half: splitMode ? half : '', zoneIdx, bounds: { x: zone.x, y: zone.y, w: zone.w, h: Math.max(zone.h, 1.5) }, lineText: zone.text || '' };
   buildPopover(null, null, zone.text);
   positionPopover(e.clientX, e.clientY);
@@ -641,7 +665,10 @@ function openPopover(e, pageNum, half, zoneIdx, zone) {
 function openEditPopover(e, note) {
   e.stopPropagation();
   pendingNote = { editId: note.id, page: note.page, half: note.half || '', bounds: note.bounds, lineText: note.lineText || '' };
-  buildPopover(note.charId, note.type, note.lineText);
+  const fc = flatChars.find(
+    c => c.castId === note.castId && c.name === (note.characterName || note.charName)
+  );
+  buildPopover(fc?.id || note.charId || null, note.type, note.lineText);
   positionPopover(e.clientX, e.clientY);
   showPopover();
 }
@@ -662,14 +689,19 @@ function buildPopover(selCharId, selType, lineText) {
   }
 
   // Cast label shows character count hint
-  if (castLabel) castLabel.textContent = characters.length === 1 ? characters[0].name : 'Cast';
+  if (castLabel) castLabel.textContent = flatChars.length === 1 ? flatChars[0].name : 'Cast';
 
-  const defChar = selCharId || (characters[activeCharIdx]?.id) || characters[0]?.id;
-  characters.forEach((c, i) => {
+  const defChar = selCharId || (flatChars[activeCharIdx]?.id) || flatChars[0]?.id;
+  flatChars.forEach((c, i) => {
     const div = document.createElement('div');
     div.className = 'popover-char' + (c.id === defChar ? ' popover-char--active' : '');
     div.dataset.id = c.id;
-    div.innerHTML = `<div class="pop-char-dot" style="background:${c.color};width:9px;height:9px;border-radius:50%;flex-shrink:0;"></div><span class="char-label">${escapeHtml(c.name)}</span><span class="shortcut-key">${i + 1}</span>`;
+    div.innerHTML = `<div class="pop-char-dot" style="background:${c.color};width:9px;height:9px;border-radius:50%;flex-shrink:0;"></div>
+      <div style="flex:1">
+        <div class="char-label">${escapeHtml(c.name)}</div>
+        ${c.actorName !== c.name ? `<div style="font-size:10px;color:#5c5850;font-family:'DM Mono',monospace">${escapeHtml(c.actorName)}</div>` : ''}
+      </div>
+      <span class="shortcut-key">${i + 1}</span>`;
     div.addEventListener('click', () => {
       charsDiv.querySelectorAll('.popover-char').forEach(el => el.classList.remove('popover-char--active'));
       div.classList.add('popover-char--active');
@@ -677,7 +709,7 @@ function buildPopover(selCharId, selType, lineText) {
     });
     charsDiv.appendChild(div);
   });
-  if (defChar) { const ci = characters.findIndex(c => c.id === defChar); if (ci >= 0) activeCharIdx = ci; }
+  if (defChar) { const ci = flatChars.findIndex(c => c.id === defChar); if (ci >= 0) activeCharIdx = ci; }
 
   const defType = selType || activeNoteType;
   const TYPE_KEYS = { skp: 'S', para: 'P', line: 'L', add: 'A', gen: 'G' };
@@ -722,12 +754,14 @@ function showPopover() {
 function closePopover() { popoverEl.style.display = 'none'; pendingNote = null; popoverOpen = false; }
 
 async function confirmNote() {
-  if (!pendingNote || activeCharIdx < 0 || !characters[activeCharIdx]) return;
-  const ch = characters[activeCharIdx];
+  if (!pendingNote || activeCharIdx < 0 || !flatChars[activeCharIdx]) return;
+  const fc = flatChars[activeCharIdx];
   const pid = state.activeProduction.id;
   const noteData = {
     uid: state.currentUser.uid,
-    charId: ch.id, charName: ch.name, charColor: ch.color,
+    castId: fc.castId,
+    characterName: fc.name,   // frozen at save time
+    charColor: fc.color,      // frozen at save time
     type: activeNoteType, page: pendingNote.page, half: pendingNote.half || '',
     zoneIdx: pendingNote.zoneIdx, bounds: pendingNote.bounds, lineText: pendingNote.lineText || '',
     productionId: pid,
@@ -748,7 +782,7 @@ async function confirmNote() {
    NOTES VIEW — RUBBER BAND DRAW
    ═══════════════════════════════════════════════════════════ */
 function notesDrawDown(e) {
-  if (e.button !== 0 || characters.length === 0) return;
+  if (e.button !== 0 || flatChars.length === 0) return;
   const wrapper = document.getElementById('ln-page-wrapper');
   const wRect = wrapper.getBoundingClientRect();
   const clickX = e.clientX - wRect.left, clickY = e.clientY - wRect.top;
@@ -1197,74 +1231,41 @@ function subscribeToNotes() {
 }
 
 /* ═══════════════════════════════════════════════════════════
-   CHARACTERS
-   ═══════════════════════════════════════════════════════════ */
-async function loadCharacters() {
-  const uid = state.currentUser.uid, pid = state.activeProduction.id;
-  try {
-    const d = await getDoc(doc(db, 'users', uid, 'productions', pid));
-    characters = d.exists() && d.data().characters ? d.data().characters : [];
-  } catch(e) { characters = []; }
-  if (characters.length > 0) activeCharIdx = 0;
-  renderSidebar();
-}
-
-async function saveCharacters() {
-  try { await setDoc(doc(db, 'users', state.currentUser.uid, 'productions', state.activeProduction.id), { characters }, { merge: true }); } catch(e) {}
-}
-
-function openCharModal() {
-  charModal.classList.add('open');
-  const usedColors = characters.map(c => c.color);
-  const availColor = COLORS.find(c => !usedColors.includes(c)) || COLORS[0];
-  let selectedColor = availColor;
-
-  charModal.innerHTML = `<div class="char-modal-card"><h3>Add Cast Member</h3>
-    <input type="text" id="cm-name" placeholder="Character / Actor name" maxlength="100" />
-    <div style="font-size:11px;color:#5c5850;margin:8px 0 4px;">Color</div>
-    <div class="char-color-grid">${COLORS.map(c => `<div class="char-color-swatch${c === availColor ? ' char-color-swatch--selected' : ''}" data-color="${c}" style="background:${c}"></div>`).join('')}</div>
-    <div class="modal-btns"><button class="modal-btn-cancel" id="cm-cancel">Cancel</button><button class="modal-btn-primary" id="cm-save">Add Member</button></div>
-  </div>`;
-
-  charModal.querySelectorAll('.char-color-swatch').forEach(s => s.addEventListener('click', () => {
-    charModal.querySelectorAll('.char-color-swatch').forEach(ss => ss.classList.remove('char-color-swatch--selected'));
-    s.classList.add('char-color-swatch--selected'); selectedColor = s.dataset.color;
-  }));
-  charModal.querySelector('#cm-cancel').addEventListener('click', () => charModal.classList.remove('open'));
-  const nameInput = charModal.querySelector('#cm-name');
-  setTimeout(() => nameInput.focus(), 50);
-  nameInput.addEventListener('keydown', e => { if (e.key === 'Enter') doAdd(); });
-  charModal.querySelector('#cm-save').addEventListener('click', doAdd);
-
-  function doAdd() {
-    const name = sanitizeName(nameInput.value);
-    if (!name) { toast('Enter a name', 'error'); return; }
-    characters.push({ id: genId(), name, color: selectedColor, email: '' });
-    activeCharIdx = characters.length - 1;
-    saveCharacters(); charModal.classList.remove('open'); renderSidebar(); toast(name + ' added');
-  }
-}
-
-/* ═══════════════════════════════════════════════════════════
    SIDEBAR
    ═══════════════════════════════════════════════════════════ */
 function renderSidebar() {
+  buildFlatChars(); // refresh in case cast changed
   const castList = document.getElementById('ln-cast-list');
-  castList.innerHTML = characters.map((c, i) => {
-    const cnt = notes.filter(n => n.charId === c.id).length;
-    return `<div class="char-item ${i === activeCharIdx ? 'char-item--active' : ''}" data-idx="${i}"><div class="char-dot" style="background:${escapeHtml(c.color)}"></div><span>${escapeHtml(c.name)}</span>${cnt ? `<span class="char-count">${cnt}</span>` : ''}<button class="delete-char" data-idx="${i}">\u00d7</button></div>`;
-  }).join('') || '<div style="color:#5c5850;font-size:12px;padding:8px;">Add cast members to get started</div>';
 
-  castList.querySelectorAll('.char-item').forEach(el => el.addEventListener('click', e => {
-    if (e.target.classList.contains('delete-char')) return;
-    activeCharIdx = parseInt(el.dataset.idx); renderSidebar();
-  }));
-  castList.querySelectorAll('.delete-char').forEach(btn => btn.addEventListener('click', e => {
-    e.stopPropagation(); const idx = parseInt(btn.dataset.idx); const ch = characters[idx];
-    if (notes.some(n => n.charId === ch.id) && !confirmDialog('Delete ' + ch.name + '? Notes will remain.')) return;
-    characters.splice(idx, 1); if (activeCharIdx >= characters.length) activeCharIdx = Math.max(0, characters.length - 1);
-    saveCharacters(); renderSidebar();
-  }));
+  if (flatChars.length === 0) {
+    castList.innerHTML = `
+      <div style="color:var(--ln-muted);font-size:12px;padding:8px 4px;line-height:1.5;">
+        No cast yet.<br>
+        <span style="color:var(--ln-gold);cursor:pointer;text-decoration:underline"
+              id="ln-go-cast">Go to Cast &amp; Crew →</span>
+      </div>`;
+    document.getElementById('ln-go-cast')?.addEventListener('click', () => {
+      import('../shared/tabs.js').then(m => m.switchTab('cast'));
+    });
+  } else {
+    castList.innerHTML = flatChars.map((c, i) => {
+      const cnt = notes.filter(
+        n => n.castId === c.castId && (n.characterName || n.charName) === c.name
+      ).length;
+      return `<div class="char-item ${i === activeCharIdx ? 'char-item--active' : ''}" data-idx="${i}">
+        <div class="char-dot" style="background:${escapeHtml(c.color)}"></div>
+        <div style="flex:1;min-width:0">
+          <div>${escapeHtml(c.name)}</div>
+          ${c.actorName !== c.name ? `<div class="char-actor" style="font-size:10px;color:var(--ln-muted);font-family:'DM Mono',monospace;">${escapeHtml(c.actorName)}</div>` : ''}
+        </div>
+        ${cnt ? `<span class="char-count">${cnt}</span>` : ''}
+      </div>`;
+    }).join('');
+
+    castList.querySelectorAll('.char-item').forEach(el => el.addEventListener('click', () => {
+      activeCharIdx = parseInt(el.dataset.idx); renderSidebar();
+    }));
+  }
 
   const typesEl = document.getElementById('ln-note-types');
   typesEl.innerHTML = NOTE_TYPES.map(t => `<button class="note-type-btn ${activeNoteType === t.key ? 'note-type-btn--active' : ''}" data-type="${t.key}">${t.key}</button>`).join('');
@@ -1273,7 +1274,12 @@ function renderSidebar() {
   const notesList = document.getElementById('ln-notes-list');
   const sorted = [...notes].sort((a, b) => a.page !== b.page ? a.page - b.page : (a.bounds?.y || 0) - (b.bounds?.y || 0));
   notesList.innerHTML = sorted.map(n => {
-    return `<div class="note-item" data-noteid="${escapeHtml(n.id)}"><div class="note-color-bar" style="background:${escapeHtml(n.charColor || '#888')}"></div><div class="note-item-content"><div class="note-item-header"><span class="note-page">p.${n.page}${n.half || ''}</span><span class="note-char-name">${escapeHtml(n.charName || '?')}</span><span class="note-type-label">${escapeHtml(n.type)}</span></div>${n.lineText ? `<div class="note-text-preview">\u201c${escapeHtml(n.lineText.slice(0, 80))}\u201d</div>` : ''}</div><button class="note-delete-btn" data-noteid="${escapeHtml(n.id)}">\u00d7</button></div>`;
+    const fc = flatChars.find(
+      c => c.castId === n.castId && c.name === (n.characterName || n.charName)
+    );
+    const color = fc?.color || n.charColor || '#888';
+    const charLabel = n.characterName || n.charName || '?';
+    return `<div class="note-item" data-noteid="${escapeHtml(n.id)}"><div class="note-color-bar" style="background:${escapeHtml(color)}"></div><div class="note-item-content"><div class="note-item-header"><span class="note-page">p.${n.page}${n.half || ''}</span><span class="note-char-name">${escapeHtml(charLabel)}</span><span class="note-type-label">${escapeHtml(n.type)}</span></div>${n.lineText ? `<div class="note-text-preview">\u201c${escapeHtml(n.lineText.slice(0, 80))}\u201d</div>` : ''}</div><button class="note-delete-btn" data-noteid="${escapeHtml(n.id)}">\u00d7</button></div>`;
   }).join('') || '<div style="color:#5c5850;font-size:12px;padding:12px;">No notes yet. Load a script and click any line.</div>';
 
   notesList.querySelectorAll('.note-item').forEach(el => el.addEventListener('click', e => {
@@ -1292,14 +1298,14 @@ function renderSidebar() {
    KEYBOARD SHORTCUTS
    ═══════════════════════════════════════════════════════════ */
 function handleKeydown(e) {
-  if (!overlay.classList.contains('open')) return;
+  if (!document.getElementById('tab-linenotes')?.classList.contains('tab-panel--active')) return;
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
   if (popoverOpen) {
     if (e.key === 'Enter') { confirmNote(); return; }
     if (e.key === 'Escape') { closePopover(); return; }
     const num = parseInt(e.key);
-    if (num >= 1 && num <= characters.length) {
+    if (num >= 1 && num <= flatChars.length) {
       document.getElementById('pop-chars').querySelectorAll('.popover-char').forEach((el, i) => el.classList.toggle('popover-char--active', i === num - 1));
       activeCharIdx = num - 1; return;
     }
@@ -1368,16 +1374,33 @@ function handleKeydown(e) {
 function openSendNotes() {
   if (notes.length === 0) { toast('No notes to send'); return; }
   sendModal.classList.add('open');
-  const byChar = {};
-  notes.forEach(n => { if (!byChar[n.charId]) byChar[n.charId] = { name: n.charName, color: n.charColor, email: '', notes: [] }; byChar[n.charId].notes.push(n); });
-  characters.forEach(c => { if (byChar[c.id]) byChar[c.id].email = c.email || ''; });
+
+  const cast = getCastMembers();
+  const byCastId = {};
+  notes.forEach(n => {
+    const castId = n.castId || n.charId; // backward compat
+    if (!byCastId[castId]) {
+      const member = cast.find(m => m.id === castId);
+      byCastId[castId] = {
+        actorName: member?.name || n.characterName || n.charName || '?',
+        actorEmail: member?.email || '',
+        color: member?.color || n.charColor || '#888',
+        notes: [],
+      };
+    }
+    byCastId[castId].notes.push(n);
+  });
+
   const date = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
   const show = state.activeProduction?.title || '';
 
-  const sections = Object.entries(byChar).filter(([, d]) => d.notes.length > 0).map(([cid, data]) => {
+  const sections = Object.entries(byCastId).filter(([, d]) => d.notes.length > 0).map(([cid, data]) => {
     const sorted = data.notes.sort((a, b) => a.page - b.page || (a.bounds?.y || 0) - (b.bounds?.y || 0));
-    const rows = sorted.map(n => `<div class="send-note-row" style="border-left-color:${escapeHtml(data.color)}"><strong>p.${n.page}${n.half || ''}</strong> [${escapeHtml(n.type)}] <em>${escapeHtml((n.lineText || '').slice(0, 100))}</em></div>`).join('');
-    return `<div class="send-char-section"><div class="send-char-header"><div style="width:10px;height:10px;border-radius:50%;background:${escapeHtml(data.color)};display:inline-block;"></div><span class="char-name">${escapeHtml(data.name)}</span></div>${rows}</div>`;
+    const rows = sorted.map(n => {
+      const charLabel = n.characterName || n.charName || '';
+      return `<div class="send-note-row" style="border-left-color:${escapeHtml(data.color)}"><strong>p.${n.page}${n.half || ''}</strong>${charLabel ? ` [${escapeHtml(charLabel)}]` : ''} [${escapeHtml(n.type)}] <em>${escapeHtml((n.lineText || '').slice(0, 100))}</em></div>`;
+    }).join('');
+    return `<div class="send-char-section"><div class="send-char-header"><div style="width:10px;height:10px;border-radius:50%;background:${escapeHtml(data.color)};display:inline-block;"></div><span class="char-name">${escapeHtml(data.actorName)}</span>${data.actorEmail ? `<span style="font-size:11px;color:#5c5850;font-family:'DM Mono',monospace;margin-left:8px;">${escapeHtml(data.actorEmail)}</span>` : ''}</div>${rows}</div>`;
   }).join('');
 
   sendModal.innerHTML = `<div class="send-notes-card"><h3>Send Line Notes</h3><div style="font-family:'DM Mono',monospace;font-size:11px;color:#5c5850;margin-bottom:16px;">${date} \u00b7 ${notes.length} note${notes.length !== 1 ? 's' : ''}</div>${sections}<div class="send-notes-actions"><button class="modal-btn-primary" id="send-print">Generate Notes Report \u2197</button><button class="modal-btn-cancel" id="send-close">Close</button></div></div>`;
@@ -1385,13 +1408,14 @@ function openSendNotes() {
   sendModal.querySelector('#send-print').addEventListener('click', () => {
     const w = window.open('', '_blank');
     if (!w) { toast('Allow popups'); return; }
-    let html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Line Notes</title><style>@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&family=DM+Sans:wght@400;500&display=swap');*{box-sizing:border-box;margin:0;padding:0}body{font-family:'DM Sans',sans-serif;background:#f5f3ee;color:#1a1814;padding:40px 48px}h1{font-family:'Instrument Serif',serif;font-size:32px;margin-bottom:6px}.meta{font-family:'DM Mono',monospace;font-size:12px;color:#999;margin-bottom:36px}.s{background:#fff;border-radius:10px;padding:22px 26px;margin-bottom:20px;box-shadow:0 2px 10px rgba(0,0,0,.07)}.sh{display:flex;align-items:center;gap:10px;margin-bottom:16px;padding-bottom:14px;border-bottom:1px solid #f0ede4}.sd{width:12px;height:12px;border-radius:50%}.sn{font-size:18px;font-weight:500;flex:1}.nr{display:flex;gap:12px;align-items:flex-start;padding:10px 0;border-bottom:1px solid #f5f3ee}.nr:last-child{border-bottom:none}.np{font-family:'DM Mono',monospace;font-size:10px;font-weight:500;color:#fff;padding:3px 8px;border-radius:3px;flex-shrink:0;margin-top:3px}.nd{display:flex;flex-direction:column;gap:5px}.pg{font-family:'DM Mono',monospace;font-size:11px;color:#aaa;margin-right:6px}.tl{font-size:13px;font-weight:500;color:#444}.lt{font-family:'Instrument Serif',serif;font-style:italic;font-size:15px;color:#333}@media print{body{padding:20px}}</style></head><body><h1>Line Notes</h1><div class="meta">${escapeHtml(show)} \u00b7 ${date} \u00b7 ${notes.length} note${notes.length !== 1 ? 's' : ''}</div>`;
-    Object.entries(byChar).forEach(([, data]) => {
+    let html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Line Notes</title><style>@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&family=DM+Sans:wght@400;500&display=swap');*{box-sizing:border-box;margin:0;padding:0}body{font-family:'DM Sans',sans-serif;background:#f5f3ee;color:#1a1814;padding:40px 48px}h1{font-family:'Instrument Serif',serif;font-size:32px;margin-bottom:6px}.meta{font-family:'DM Mono',monospace;font-size:12px;color:#999;margin-bottom:36px}.s{background:#fff;border-radius:10px;padding:22px 26px;margin-bottom:20px;box-shadow:0 2px 10px rgba(0,0,0,.07)}.sh{display:flex;align-items:center;gap:10px;margin-bottom:16px;padding-bottom:14px;border-bottom:1px solid #f0ede4}.sd{width:12px;height:12px;border-radius:50%}.sn{font-size:18px;font-weight:500;flex:1}.se{font-family:'DM Mono',monospace;font-size:11px;color:#999;margin-top:2px}.nr{display:flex;gap:12px;align-items:flex-start;padding:10px 0;border-bottom:1px solid #f5f3ee}.nr:last-child{border-bottom:none}.np{font-family:'DM Mono',monospace;font-size:10px;font-weight:500;color:#fff;padding:3px 8px;border-radius:3px;flex-shrink:0;margin-top:3px}.nd{display:flex;flex-direction:column;gap:5px}.pg{font-family:'DM Mono',monospace;font-size:11px;color:#aaa;margin-right:6px}.tl{font-size:13px;font-weight:500;color:#444}.lt{font-family:'Instrument Serif',serif;font-style:italic;font-size:15px;color:#333}@media print{body{padding:20px}}</style></head><body><h1>Line Notes</h1><div class="meta">${escapeHtml(show)} \u00b7 ${date} \u00b7 ${notes.length} note${notes.length !== 1 ? 's' : ''}</div>`;
+    Object.entries(byCastId).forEach(([, data]) => {
       if (!data.notes.length) return;
       const sorted = data.notes.sort((a, b) => a.page - b.page);
-      html += `<section class="s"><div class="sh"><span class="sd" style="background:${escapeHtml(data.color)}"></span><span class="sn">${escapeHtml(data.name)}</span></div>`;
+      html += `<section class="s"><div class="sh"><span class="sd" style="background:${escapeHtml(data.color)}"></span><div style="flex:1"><div class="sn">${escapeHtml(data.actorName)}</div>${data.actorEmail ? `<div class="se">${escapeHtml(data.actorEmail)}</div>` : ''}</div></div>`;
       sorted.forEach(n => {
-        html += `<div class="nr"><div class="np" style="background:${escapeHtml(data.color)}">${escapeHtml(n.type)}</div><div class="nd"><div><span class="pg">p.${n.page}${n.half || ''}</span><span class="tl">${NOTE_TYPES_MAP[n.type] || n.type}</span></div>${n.lineText ? `<div class="lt">\u201c${escapeHtml(n.lineText)}\u201d</div>` : ''}</div></div>`;
+        const charLabel = n.characterName || n.charName || '';
+        html += `<div class="nr"><div class="np" style="background:${escapeHtml(data.color)}">${escapeHtml(n.type)}</div><div class="nd"><div><span class="pg">p.${n.page}${n.half || ''}</span>${charLabel ? `<span style="font-size:11px;color:#aaa;margin-right:6px;">[${escapeHtml(charLabel)}]</span>` : ''}<span class="tl">${NOTE_TYPES_MAP[n.type] || n.type}</span></div>${n.lineText ? `<div class="lt">\u201c${escapeHtml(n.lineText)}\u201d</div>` : ''}</div></div>`;
       });
       html += '</section>';
     });

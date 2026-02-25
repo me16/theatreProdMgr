@@ -36,6 +36,9 @@ let zeDrawStart = null;
 let zeDragState = null;    // {type:'move'|'resize', startX, startY, origBounds, idx, pw, ph}
 let zeDetailDirty = false;
 
+// Notes-view keyboard navigation state
+let notesHoveredZoneIdx = null;
+
 // Notes-view drawing state
 let drawStart = null;
 let drawing = false;
@@ -136,13 +139,18 @@ export function openLineNotes() {
   currentHalf = 'L';
   notes = [];
   lineZones = {};
+  pdfDoc = null;
+  totalPages = 0;
   zeSelectedIdx = null;
   zeMultiSelected.clear();
+  notesHoveredZoneIdx = null;
+  renderGen = 0;
+  zeRenderGen = 0;
 
   loadCharacters();
   subscribeToNotes();
   loadScript();
-  updateViewButtons();
+  switchView('notes');
   renderSidebar();
 }
 
@@ -290,12 +298,18 @@ async function changePage(delta) {
 /* ═══════════════════════════════════════════════════════════
    NOTES VIEW — RENDER PAGE
    ═══════════════════════════════════════════════════════════ */
+let renderGen = 0; // incremented on each renderPage call to cancel stale renders
+
 async function renderPage(num) {
+  const gen = ++renderGen;
   closePopover();
+  notesHoveredZoneIdx = null;
   const hitOverlay = document.getElementById('ln-hit-overlay');
   hitOverlay.innerHTML = '';
 
   const page = await pdfDoc.getPage(num);
+  if (gen !== renderGen) return; // stale render — a newer call has taken over
+
   const viewport = page.getViewport({ scale: pdfScale });
   const canvas = document.getElementById('ln-canvas');
   const ctx = canvas.getContext('2d');
@@ -311,10 +325,14 @@ async function renderPage(num) {
     canvas.width = viewport.width; canvas.height = viewport.height;
     await page.render({ canvasContext: ctx, viewport }).promise;
   }
+  if (gen !== renderGen) return;
 
   document.getElementById('ln-page-input').value = num;
   const zKey = pk();
   if (!lineZones[zKey]) await loadOrExtractZones(page, num, viewport, zKey);
+  if (gen !== renderGen) return;
+
+  hitOverlay.innerHTML = ''; // clear again after any async zone load
   renderLineZones(zKey);
   renderNoteMarkers(num, currentHalf);
 }
@@ -526,8 +544,8 @@ function renderLineZones(zKey) {
     }
     const div = document.createElement('div');
     div.className = 'line-zone' + (existingZoneIdxs.has(idx) ? ' has-note' : '');
-    div.style.left = zone.x + '%'; div.style.top = zone.y + '%';
-    div.style.width = zone.w + '%'; div.style.height = Math.max(zone.h, 1.5) + '%';
+    div.style.left = Math.max(0, zone.x - 0.5) + '%'; div.style.top = zone.y + '%';
+    div.style.width = Math.min(100, zone.w + 1) + '%'; div.style.height = Math.max(zone.h + 0.6, 2.2) + '%';
     div.dataset.zone = idx;
     div.title = zone.text ? zone.text.substring(0, 80) : '';
     div.addEventListener('click', e => {
@@ -572,6 +590,42 @@ function redrawOverlay(num) {
   renderNoteMarkers(num, currentHalf);
 }
 
+/* ── Notes-view keyboard zone navigation ── */
+function getNavigableZoneIndices() {
+  const zones = lineZones[pk()] || [];
+  const result = [];
+  zones.forEach((z, i) => { if (!z.isCharName && !z.isStageDirection) result.push(i); });
+  return result;
+}
+
+function notesSetHoveredZone(rawIdx) {
+  const hitOverlay = document.getElementById('ln-hit-overlay');
+  hitOverlay.querySelectorAll('.line-zone').forEach(el => el.classList.remove('ln-zone-focused'));
+  notesHoveredZoneIdx = rawIdx;
+  if (rawIdx === null) return;
+  const el = hitOverlay.querySelector(`.line-zone[data-zone="${rawIdx}"]`);
+  if (el) {
+    el.classList.add('ln-zone-focused');
+    el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+}
+
+function notesActivateFocusedZone() {
+  if (notesHoveredZoneIdx === null) return;
+  const zones = lineZones[pk()] || [];
+  const zone = zones[notesHoveredZoneIdx];
+  if (!zone) return;
+  const el = document.getElementById('ln-hit-overlay').querySelector(`.line-zone[data-zone="${notesHoveredZoneIdx}"]`);
+  if (!el) return;
+  const rect = el.getBoundingClientRect();
+  const cx = rect.left + rect.width / 2;
+  const cy = rect.top + rect.height / 2;
+  const syntheticE = { clientX: cx, clientY: cy, stopPropagation: () => {} };
+  const existing = notes.find(n => n.page === currentPage && (splitMode ? n.half === currentHalf : true) && n.zoneIdx === notesHoveredZoneIdx);
+  if (existing) openEditPopover(syntheticE, existing);
+  else openPopover(syntheticE, currentPage, currentHalf, notesHoveredZoneIdx, zone);
+}
+
 /* ═══════════════════════════════════════════════════════════
    NOTES VIEW — POPOVER
    ═══════════════════════════════════════════════════════════ */
@@ -596,39 +650,62 @@ function buildPopover(selCharId, selType, lineText) {
   const charsDiv = document.getElementById('pop-chars');
   const typesDiv = document.getElementById('pop-types');
   const lineEl = document.getElementById('pop-line-text');
+  const castLabel = document.getElementById('pop-cast-label');
   charsDiv.innerHTML = ''; typesDiv.innerHTML = '';
-  if (lineText && lineText.trim().length > 1) { lineEl.textContent = '\u201c' + lineText.trim() + '\u201d'; lineEl.style.display = 'block'; }
-  else lineEl.style.display = 'none';
+
+  // Line text — show/hide via inline style since CSS default is display:none
+  if (lineText && lineText.trim().length > 1) {
+    lineEl.textContent = '\u201c' + lineText.trim() + '\u201d';
+    lineEl.style.display = '';
+  } else {
+    lineEl.style.display = 'none';
+  }
+
+  // Cast label shows character count hint
+  if (castLabel) castLabel.textContent = characters.length === 1 ? characters[0].name : 'Cast';
 
   const defChar = selCharId || (characters[activeCharIdx]?.id) || characters[0]?.id;
   characters.forEach((c, i) => {
     const div = document.createElement('div');
     div.className = 'popover-char' + (c.id === defChar ? ' popover-char--active' : '');
     div.dataset.id = c.id;
-    div.innerHTML = `<div class="pop-char-dot" style="background:${c.color};width:8px;height:8px;border-radius:50%;flex-shrink:0;"></div><span>${escapeHtml(c.name)}</span><span class="shortcut-key">${i+1}</span>`;
-    div.addEventListener('click', () => { charsDiv.querySelectorAll('.popover-char').forEach(el => el.classList.remove('popover-char--active')); div.classList.add('popover-char--active'); activeCharIdx = i; });
+    div.innerHTML = `<div class="pop-char-dot" style="background:${c.color};width:9px;height:9px;border-radius:50%;flex-shrink:0;"></div><span class="char-label">${escapeHtml(c.name)}</span><span class="shortcut-key">${i + 1}</span>`;
+    div.addEventListener('click', () => {
+      charsDiv.querySelectorAll('.popover-char').forEach(el => el.classList.remove('popover-char--active'));
+      div.classList.add('popover-char--active');
+      activeCharIdx = i;
+    });
     charsDiv.appendChild(div);
   });
   if (defChar) { const ci = characters.findIndex(c => c.id === defChar); if (ci >= 0) activeCharIdx = ci; }
 
   const defType = selType || activeNoteType;
+  const TYPE_KEYS = { skp: 'S', para: 'P', line: 'L', add: 'A', gen: 'G' };
   Object.entries(NOTE_TYPES_MAP).forEach(([key, label]) => {
     const btn = document.createElement('button');
     btn.className = 'popover-type' + (key === defType ? ' popover-type--active' : '');
-    btn.dataset.type = key; btn.textContent = key; btn.title = label;
-    btn.addEventListener('click', () => { typesDiv.querySelectorAll('.popover-type').forEach(el => el.classList.remove('popover-type--active')); btn.classList.add('popover-type--active'); activeNoteType = key; });
+    btn.dataset.type = key;
+    btn.title = label;
+    btn.innerHTML = `<span>${key}</span><span class="type-key">${TYPE_KEYS[key] || key[0].toUpperCase()}</span>`;
+    btn.addEventListener('click', () => {
+      typesDiv.querySelectorAll('.popover-type').forEach(el => el.classList.remove('popover-type--active'));
+      btn.classList.add('popover-type--active');
+      activeNoteType = key;
+    });
     typesDiv.appendChild(btn);
   });
   if (defType) activeNoteType = defType;
 
-  // Update confirm button text
-  document.getElementById('pop-confirm-btn').textContent = pendingNote?.editId ? 'Update' : 'Add Note \u21b5';
+  document.getElementById('pop-confirm-btn').textContent = pendingNote?.editId ? 'Update \u21b5' : 'Add Note \u21b5';
 }
 
 function positionPopover(mx, my) {
-  popoverEl.style.visibility = 'hidden'; popoverEl.style.display = 'flex';
-  const pw = popoverEl.offsetWidth || 250, ph = popoverEl.offsetHeight || 220;
-  popoverEl.style.display = 'none'; popoverEl.style.visibility = '';
+  popoverEl.style.visibility = 'hidden';
+  popoverEl.style.display = 'flex';
+  popoverEl.style.flexDirection = 'column';
+  const pw = popoverEl.offsetWidth || 260, ph = popoverEl.offsetHeight || 200;
+  popoverEl.style.display = 'none';
+  popoverEl.style.visibility = '';
   let left = mx + 14, top = my - 24;
   if (left + pw > window.innerWidth - 16) left = mx - pw - 14;
   if (top + ph > window.innerHeight - 16) top = window.innerHeight - ph - 16;
@@ -636,7 +713,9 @@ function positionPopover(mx, my) {
 }
 
 function showPopover() {
-  popoverEl.style.display = 'flex'; popoverOpen = true;
+  popoverEl.style.display = 'flex';
+  popoverEl.style.flexDirection = 'column';
+  popoverOpen = true;
   _popCloseGuard = true;
   requestAnimationFrame(() => { _popCloseGuard = false; });
 }
@@ -740,13 +819,18 @@ function globalMouseUp(e) {
 /* ═══════════════════════════════════════════════════════════
    ZONE EDITOR VIEW
    ═══════════════════════════════════════════════════════════ */
+let zeRenderGen = 0;
+
 async function renderZoneEditorPage(num) {
+  const gen = ++zeRenderGen;
   zeSelectedIdx = null;
   zeMultiSelected.clear();
   document.getElementById('ze-detail').classList.remove('visible');
   document.getElementById('ze-multi-bar').classList.remove('visible');
 
   const page = await pdfDoc.getPage(num);
+  if (gen !== zeRenderGen) return;
+
   const viewport = page.getViewport({ scale: pdfScale });
   const canvas = document.getElementById('ze-canvas');
   const ctx = canvas.getContext('2d');
@@ -762,10 +846,12 @@ async function renderZoneEditorPage(num) {
     canvas.width = viewport.width; canvas.height = viewport.height;
     await page.render({ canvasContext: ctx, viewport }).promise;
   }
+  if (gen !== zeRenderGen) return;
 
   document.getElementById('ln-page-input').value = num;
   const zKey = pk();
   if (!lineZones[zKey]) await loadOrExtractZones(page, num, viewport, zKey);
+  if (gen !== zeRenderGen) return;
 
   zeRenderZones();
   zeUpdateListPanel();
@@ -864,19 +950,22 @@ function zeFinishDraw(e) {
   const zones = zeCurrentZones();
   zones.push(newZone);
   zeDrawStart = null;
-  zeRenderZones(); zeUpdateListPanel(); zeSelectZone(zones.length - 1);
+  zeRenderZones(); zeUpdateListPanel(); zeSelectZone(zones.length - 1, true);
   debounceSaveZones();
-  toast('Zone drawn \u2014 edit text or type in the panel');
+  toast('Zone drawn — type text in the panel →');
 }
 
 /* ── Zone editor selection ── */
-function zeSelectZone(idx) {
+function zeSelectZone(idx, focusText = false) {
   zeSelectedIdx = idx;
   document.getElementById('ze-edit-overlay').querySelectorAll('.ze-zone').forEach(el => el.classList.toggle('selected', parseInt(el.dataset.idx) === idx));
   document.getElementById('ze-items-list').querySelectorAll('.ze-list-item').forEach(el => el.classList.toggle('selected', parseInt(el.dataset.idx) === idx));
   if (idx !== null && idx !== undefined) {
-    zePopulateDetail(idx);
+    zePopulateDetail(idx, focusText);
     document.getElementById('ze-detail').classList.add('visible');
+    // Scroll the list item into view
+    const li = document.getElementById('ze-items-list')?.querySelector(`[data-idx="${idx}"]`);
+    if (li) li.scrollIntoView({ block: 'nearest' });
   } else {
     document.getElementById('ze-detail').classList.remove('visible');
   }
@@ -898,7 +987,7 @@ function zeRefreshMultiBar() {
   else bar.classList.remove('visible');
 }
 
-function zePopulateDetail(idx) {
+function zePopulateDetail(idx, focusText = false) {
   const z = zeCurrentZones()[idx]; if (!z) return;
   document.getElementById('zd-x').value = z.x.toFixed(1);
   document.getElementById('zd-y').value = z.y.toFixed(1);
@@ -907,6 +996,10 @@ function zePopulateDetail(idx) {
   document.getElementById('zd-text').value = z.text || '';
   document.getElementById('zd-charname').checked = !!z.isCharName;
   document.getElementById('zd-stagedir').checked = !!z.isStageDirection;
+  if (focusText) {
+    const ta = document.getElementById('zd-text');
+    requestAnimationFrame(() => { ta.focus(); ta.select(); });
+  }
 }
 
 function zeApplyDetail() {
@@ -1008,6 +1101,35 @@ function wireZeToolbar() {
   document.getElementById('ze-btn-multi-clear')?.addEventListener('click', zeClearMultiSelect);
   document.getElementById('ze-btn-apply')?.addEventListener('click', zeApplyDetail);
   document.getElementById('ze-btn-del-zone')?.addEventListener('click', zeDeleteSelected);
+
+  // Live-update text as user types — no Apply needed for text
+  const textArea = document.getElementById('zd-text');
+  if (textArea) {
+    textArea.addEventListener('input', () => {
+      if (zeSelectedIdx === null) return;
+      const z = zeCurrentZones()[zeSelectedIdx];
+      if (!z) return;
+      z.text = textArea.value;
+      // Update the label on the canvas zone in real time
+      const ovl = document.getElementById('ze-edit-overlay');
+      const el = ovl?.querySelector(`[data-idx="${zeSelectedIdx}"] .ze-zone-label`);
+      if (el) el.textContent = textArea.value ? textArea.value.substring(0, 50) : `[zone ${zeSelectedIdx}]`;
+      // Update the list item text in real time
+      const li = document.getElementById('ze-items-list')?.querySelector(`[data-idx="${zeSelectedIdx}"] .ze-item-text, [data-idx="${zeSelectedIdx}"] .ze-item-no-text`);
+      if (li) {
+        li.className = textArea.value ? 'ze-item-text' : 'ze-item-no-text';
+        li.textContent = textArea.value ? textArea.value.substring(0, 60) + (textArea.value.length > 60 ? '…' : '') : '[no text]';
+      }
+      debounceSaveZones();
+    });
+    textArea.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); zeApplyDetail(); }
+    });
+  }
+
+  // Checkboxes apply immediately
+  document.getElementById('zd-charname')?.addEventListener('change', zeApplyDetail);
+  document.getElementById('zd-stagedir')?.addEventListener('change', zeApplyDetail);
 }
 
 async function zeReExtract() {
@@ -1191,7 +1313,36 @@ function handleKeydown(e) {
 
   if (e.key === 'ArrowRight' || e.key === ']') changePage(1);
   if (e.key === 'ArrowLeft' || e.key === '[') changePage(-1);
-  if (e.key === 'Escape') { closePopover(); zeSelectZone(null); zeClearMultiSelect(); }
+  if (e.key === 'Escape') { closePopover(); zeSelectZone(null); zeClearMultiSelect(); notesSetHoveredZone(null); }
+
+  // Up/Down: navigate zones on current page
+  if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+    e.preventDefault();
+    const dir = e.key === 'ArrowDown' ? 1 : -1;
+
+    if (currentView === 'notes') {
+      const nav = getNavigableZoneIndices();
+      if (!nav.length) return;
+      const curPos = notesHoveredZoneIdx !== null ? nav.indexOf(notesHoveredZoneIdx) : -1;
+      let nextPos;
+      if (curPos === -1) nextPos = dir === 1 ? 0 : nav.length - 1;
+      else nextPos = Math.max(0, Math.min(nav.length - 1, curPos + dir));
+      notesSetHoveredZone(nav[nextPos]);
+    } else if (currentView === 'zones') {
+      const zones = zeCurrentZones();
+      if (!zones.length) return;
+      const cur = zeSelectedIdx !== null ? zeSelectedIdx : (dir === 1 ? -1 : zones.length);
+      const next = Math.max(0, Math.min(zones.length - 1, cur + dir));
+      zeSelectZone(next);
+    }
+    return;
+  }
+
+  // Enter: activate the focused/selected zone
+  if (e.key === 'Enter') {
+    if (currentView === 'notes') { notesActivateFocusedZone(); return; }
+    if (currentView === 'zones' && zeSelectedIdx !== null) { zeSelectZone(zeSelectedIdx, true); return; }
+  }
 
   if (currentView === 'zones') {
     if ((e.key === 'Delete' || e.key === 'Backspace')) {

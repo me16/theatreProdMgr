@@ -8,8 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;700&family=Instrument+Serif&family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@400;600;700&display=swap" rel="stylesheet" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-  <style>
-    /* ===== RESET & BASE ===== */
+  <style>/* ===== RESET & BASE ===== */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; overflow: hidden; }
     body {
@@ -75,14 +74,11 @@
     .login-btn {
       width: 100%; padding: 12px; margin-top: 8px;
       background: #d4af37; color: #0f0f1e; border: none; border-radius: 8px;
-      font-size: 15px; font-weight: 600; letter-spacing: 0.5px;
-      transition: background 0.2s;
+      font-size: 15px; font-weight: 600; letter-spacing: 0.5px; transition: background 0.2s;
     }
     .login-btn:hover { background: #e0c04a; }
     .login-btn:disabled { opacity: 0.6; cursor: not-allowed; }
-    .login-error {
-      color: #e63946; font-size: 13px; margin-top: 12px; min-height: 20px;
-    }
+    .login-error { color: #e63946; font-size: 13px; margin-top: 12px; min-height: 20px; }
 
     /* ===== DASHBOARD ===== */
     #dashboard-view {
@@ -96,10 +92,7 @@
       background: rgba(15,15,30,0.85); backdrop-filter: blur(8px);
       position: sticky; top: 0; z-index: 10;
     }
-    .dash-header .logo {
-      font-family: 'Instrument Serif', serif; font-size: 28px;
-      color: #d4af37; letter-spacing: 3px;
-    }
+    .dash-header .logo { font-family: 'Instrument Serif', serif; font-size: 28px; color: #d4af37; letter-spacing: 3px; }
     .dash-header-right { display: flex; align-items: center; gap: 12px; }
     .dash-header .user-email { font-size: 13px; color: #888; }
     .dash-logout-btn {
@@ -108,29 +101,20 @@
     }
     .dash-logout-btn:hover { border-color: #e63946; color: #e63946; }
     .dash-body { max-width: 960px; margin: 0 auto; padding: 32px 24px; }
-    .dash-section-title {
-      font-family: 'Playfair Display', serif; font-size: 22px; color: #d4af37;
-      margin-bottom: 20px;
-    }
+    .dash-section-title { font-family: 'Playfair Display', serif; font-size: 22px; color: #d4af37; margin-bottom: 20px; }
     .dash-actions { display: flex; gap: 12px; margin-bottom: 32px; flex-wrap: wrap; }
     .dash-action-btn {
       padding: 10px 20px; background: #1a1a2e; border: 1px dashed #d4af37;
       color: #d4af37; border-radius: 8px; font-size: 14px; transition: all 0.2s;
     }
     .dash-action-btn:hover { background: #2a2a3e; }
-    .productions-grid {
-      display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-      gap: 16px;
-    }
+    .productions-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
     .production-card {
       background: #1a1a2e; border: 1px solid #2a2a3e; border-radius: 12px;
       padding: 20px; transition: border-color 0.2s;
     }
     .production-card:hover { border-color: #d4af37; }
-    .production-card h3 {
-      font-family: 'Playfair Display', serif; font-size: 18px; color: #e0e0e0;
-      margin-bottom: 8px;
-    }
+    .production-card h3 { font-family: 'Playfair Display', serif; font-size: 18px; color: #e0e0e0; margin-bottom: 8px; }
     .role-badge {
       display: inline-block; padding: 2px 10px; border-radius: 12px;
       font-size: 11px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase;
@@ -140,8 +124,7 @@
     .production-card .meta { font-size: 12px; color: #666; margin-top: 8px; }
     .production-card .open-btn {
       margin-top: 12px; padding: 8px 20px; background: #d4af37; color: #0f0f1e;
-      border: none; border-radius: 6px; font-size: 13px; font-weight: 600;
-      transition: background 0.2s;
+      border: none; border-radius: 6px; font-size: 13px; font-weight: 600; transition: background 0.2s;
     }
     .production-card .open-btn:hover { background: #e0c04a; }
     .empty-state { color: #555; font-size: 14px; text-align: center; padding: 40px 0; }
@@ -155,13 +138,9 @@
       background: #1a1a2e; border: 1px solid #2a2a3e; border-radius: 12px;
       padding: 32px; width: 420px; max-width: 90vw;
     }
-    .modal-card h2 {
-      font-family: 'Playfair Display', serif; font-size: 20px; color: #d4af37;
-      margin-bottom: 20px;
-    }
+    .modal-card h2 { font-family: 'Playfair Display', serif; font-size: 20px; color: #d4af37; margin-bottom: 20px; }
     .modal-card label { display: block; font-size: 13px; color: #888; margin-bottom: 6px; }
-    .modal-card input[type="text"],
-    .modal-card input[type="file"] {
+    .modal-card input[type="text"], .modal-card input[type="file"] {
       width: 100%; padding: 10px 14px; margin-bottom: 16px;
       background: #0f0f1e; border: 1px solid #2a2a3e; border-radius: 6px;
       color: #e0e0e0; font-size: 14px; outline: none;
@@ -195,43 +174,29 @@
     }
     .app-header .logo {
       font-family: 'Instrument Serif', serif; font-size: 24px;
-      color: #d4af37; letter-spacing: 2px; cursor: pointer;
-      transition: opacity 0.2s;
+      color: #d4af37; letter-spacing: 2px; cursor: pointer; transition: opacity 0.2s;
     }
     .app-header .logo:hover { opacity: 0.8; }
-    .app-header .prod-title {
-      font-family: 'Playfair Display', serif; font-size: 16px; color: #ccc;
-    }
+    .app-header .prod-title { font-family: 'Playfair Display', serif; font-size: 16px; color: #ccc; }
     .app-header .spacer { flex: 1; }
     .app-header-btn {
       padding: 6px 14px; background: transparent; border: 1px solid #2a2a3e;
       color: #aaa; border-radius: 6px; font-size: 12px; transition: all 0.2s;
     }
     .app-header-btn:hover { border-color: #d4af37; color: #d4af37; }
-    .app-header-btn--accent {
-      border-color: #d4af37; color: #d4af37;
-    }
+    .app-header-btn--accent { border-color: #d4af37; color: #d4af37; }
     .app-header-btn--accent:hover { background: #d4af37; color: #0f0f1e; }
-    .app-header .gear-btn {
-      background: none; border: none; color: #888; font-size: 18px;
-      transition: color 0.2s; padding: 4px 8px;
-    }
+    .app-header .gear-btn { background: none; border: none; color: #888; font-size: 18px; transition: color 0.2s; padding: 4px 8px; }
     .app-header .gear-btn:hover { color: #d4af37; }
 
     /* ===== PROPS TABS ===== */
-    .props-tabs {
-      display: flex; border-bottom: 1px solid #2a2a3e; background: #12122a;
-      flex-shrink: 0;
-    }
+    .props-tabs { display: flex; border-bottom: 1px solid #2a2a3e; background: #12122a; flex-shrink: 0; }
     .props-tab {
-      padding: 10px 24px; background: none; border: none;
-      color: #888; font-size: 13px; font-weight: 500;
+      padding: 10px 24px; background: none; border: none; color: #888; font-size: 13px; font-weight: 500;
       border-bottom: 2px solid transparent; transition: all 0.2s;
     }
     .props-tab:hover { color: #ccc; }
     .props-tab--active { color: #d4af37; border-bottom-color: #d4af37; }
-
-    /* ===== PROPS MAIN CONTENT ===== */
     .props-content { flex: 1; overflow-y: auto; padding: 24px; }
 
     /* ===== PROP FORM ===== */
@@ -239,65 +204,47 @@
       background: #1a1a2e; border: 1px solid #2a2a3e; border-radius: 12px;
       padding: 24px; margin-bottom: 24px;
     }
-    .prop-form h3 {
-      font-family: 'Playfair Display', serif; font-size: 18px; color: #d4af37;
-      margin-bottom: 16px;
-    }
+    .prop-form h3 { font-family: 'Playfair Display', serif; font-size: 18px; color: #d4af37; margin-bottom: 16px; }
     .form-row { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
     .form-row label { font-size: 13px; color: #888; min-width: 100px; }
     .form-input {
       padding: 8px 12px; background: #0f0f1e; border: 1px solid #2a2a3e;
-      border-radius: 6px; color: #e0e0e0; font-size: 14px; outline: none;
-      transition: border-color 0.2s;
+      border-radius: 6px; color: #e0e0e0; font-size: 14px; outline: none; transition: border-color 0.2s;
     }
     .form-input:focus { border-color: #d4af37; }
     .form-select {
       padding: 8px 12px; background: #0f0f1e; border: 1px solid #2a2a3e;
-      border-radius: 6px; color: #e0e0e0; font-size: 14px; outline: none;
-      appearance: none; cursor: pointer;
+      border-radius: 6px; color: #e0e0e0; font-size: 14px; outline: none; appearance: none; cursor: pointer;
     }
     .cue-rows { margin: 16px 0; }
     .cue-row {
       display: flex; gap: 8px; align-items: center; margin-bottom: 8px;
       padding: 10px; background: #12122a; border-radius: 8px; flex-wrap: wrap;
     }
-    .cue-row .cue-num {
-      font-family: 'DM Mono', monospace; color: #d4af37; font-size: 12px;
-      min-width: 32px; text-align: center;
-    }
+    .cue-row .cue-num { font-family: 'DM Mono', monospace; color: #d4af37; font-size: 12px; min-width: 32px; text-align: center; }
     .cue-row .arrow { color: #555; font-size: 14px; }
     .cue-row input { width: 70px; }
     .cue-row select { width: auto; }
     .cue-row .carrier-input { width: 110px; }
-    .cue-row .remove-cue-btn {
-      background: none; border: none; color: #e63946; font-size: 16px;
-      padding: 4px 8px; transition: opacity 0.2s;
-    }
+    .cue-row .remove-cue-btn { background: none; border: none; color: #e63946; font-size: 16px; padding: 4px 8px; transition: opacity 0.2s; }
     .cue-row .remove-cue-btn:hover { opacity: 0.7; }
     .add-cue-btn {
       padding: 8px 16px; background: transparent; border: 1px dashed #2a2a3e;
-      color: #888; border-radius: 6px; font-size: 13px; transition: all 0.2s;
-      width: 100%;
+      color: #888; border-radius: 6px; font-size: 13px; transition: all 0.2s; width: 100%;
     }
     .add-cue-btn:hover { border-color: #d4af37; color: #d4af37; }
     .form-actions { display: flex; gap: 10px; margin-top: 16px; }
 
     /* ===== PROPS TABLE ===== */
     .props-table-wrap { overflow-x: auto; }
-    .props-table {
-      width: 100%; border-collapse: collapse; font-size: 14px;
-    }
+    .props-table { width: 100%; border-collapse: collapse; font-size: 14px; }
     .props-table th {
       text-align: left; padding: 10px 12px; color: #888; font-size: 12px;
-      font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
-      border-bottom: 1px solid #2a2a3e;
+      font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #2a2a3e;
     }
     .props-table td { padding: 10px 12px; border-bottom: 1px solid #1a1a3e; }
     .props-table tr:hover td { background: rgba(212,175,55,0.03); }
-    .cue-tag {
-      display: inline-block; padding: 2px 8px; border-radius: 4px;
-      font-size: 11px; font-family: 'DM Mono', monospace; margin: 2px;
-    }
+    .cue-tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-family: 'DM Mono', monospace; margin: 2px; }
     .cue-tag--enter { background: #1a3a2a; color: #4caf50; }
     .cue-tag--exit { background: #3a1a1a; color: #e63946; }
 
@@ -306,127 +253,66 @@
       display: flex; align-items: center; gap: 16px; margin-bottom: 20px;
       padding: 12px 16px; background: #1a1a2e; border-radius: 8px;
     }
-    .stage-nav .page-display {
-      font-family: 'DM Mono', monospace; font-size: 16px; color: #d4af37;
-      min-width: 80px; text-align: center;
-    }
+    .stage-nav .page-display { font-family: 'DM Mono', monospace; font-size: 16px; color: #d4af37; min-width: 80px; text-align: center; }
     .stage-nav button {
       padding: 6px 14px; background: #0f0f1e; border: 1px solid #2a2a3e;
       color: #ccc; border-radius: 6px; font-size: 13px; transition: all 0.2s;
     }
     .stage-nav button:hover { border-color: #d4af37; color: #d4af37; }
-    .stage-columns {
-      display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; min-height: 300px;
-    }
-    .stage-col {
-      border-radius: 12px; padding: 16px; min-height: 200px;
-    }
+    .stage-columns { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; min-height: 300px; }
+    .stage-col { border-radius: 12px; padding: 16px; min-height: 200px; }
     .stage-col--sl { background: #2d5a3d; }
     .stage-col--on { background: #3a1525; }
     .stage-col--sr { background: #3d4a5c; }
-    .stage-col h4 {
-      font-family: 'Playfair Display', serif; font-size: 14px; color: rgba(255,255,255,0.7);
-      margin-bottom: 12px; text-align: center; text-transform: uppercase; letter-spacing: 1px;
-    }
-    .stage-prop {
-      background: rgba(0,0,0,0.25); border-radius: 8px; padding: 10px 12px;
-      margin-bottom: 8px; cursor: pointer; transition: all 0.2s;
-      border: 1px solid transparent;
-    }
+    .stage-col h4 { font-family: 'Playfair Display', serif; font-size: 14px; color: rgba(255,255,255,0.7); margin-bottom: 12px; text-align: center; text-transform: uppercase; letter-spacing: 1px; }
+    .stage-prop { background: rgba(0,0,0,0.25); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; cursor: pointer; transition: all 0.2s; border: 1px solid transparent; }
     .stage-prop:hover { border-color: rgba(255,255,255,0.15); }
     .stage-prop--warn { border-color: #d4af37; box-shadow: 0 0 12px rgba(212,175,55,0.15); }
     .stage-prop .prop-name { font-weight: 600; font-size: 14px; }
-    .stage-prop .prop-carrier {
-      font-size: 12px; color: rgba(255,255,255,0.5); margin-top: 2px;
-    }
+    .stage-prop .prop-carrier { font-size: 12px; color: rgba(255,255,255,0.5); margin-top: 2px; }
 
     /* ===== PROP NOTES MODAL ===== */
-    .prop-notes-modal {
-      position: fixed; inset: 0; z-index: 400;
-      background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center;
-    }
-    .prop-notes-card {
-      background: #1a1a2e; border: 1px solid #2a2a3e; border-radius: 12px;
-      padding: 24px; width: 520px; max-width: 90vw; max-height: 80vh; overflow-y: auto;
-    }
-    .prop-notes-card h3 {
-      font-family: 'Playfair Display', serif; font-size: 18px; color: #d4af37;
-      margin-bottom: 12px;
-    }
+    .prop-notes-modal { position: fixed; inset: 0; z-index: 400; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; }
+    .prop-notes-card { background: #1a1a2e; border: 1px solid #2a2a3e; border-radius: 12px; padding: 24px; width: 520px; max-width: 90vw; max-height: 80vh; overflow-y: auto; }
+    .prop-notes-card h3 { font-family: 'Playfair Display', serif; font-size: 18px; color: #d4af37; margin-bottom: 12px; }
     .prop-notes-card .cue-summary { font-size: 13px; color: #888; margin-bottom: 16px; }
-    .prop-notes-card textarea {
-      width: 100%; min-height: 120px; padding: 12px;
-      background: #0f0f1e; border: 1px solid #2a2a3e; border-radius: 8px;
-      color: #e0e0e0; font-size: 14px; resize: vertical; outline: none;
-    }
+    .prop-notes-card textarea { width: 100%; min-height: 120px; padding: 12px; background: #0f0f1e; border: 1px solid #2a2a3e; border-radius: 8px; color: #e0e0e0; font-size: 14px; resize: vertical; outline: none; }
     .prop-notes-card textarea:focus { border-color: #d4af37; }
     .prop-notes-card textarea:disabled { opacity: 0.6; cursor: not-allowed; }
 
     /* ===== PRE/POST CHECK ===== */
     .check-section { margin-bottom: 32px; }
-    .check-section h3 {
-      font-family: 'Playfair Display', serif; font-size: 18px; color: #d4af37;
-      margin-bottom: 4px;
-    }
-    .check-progress {
-      font-size: 12px; color: #888; margin-bottom: 12px;
-    }
-    .check-progress .badge {
-      display: inline-block; padding: 2px 8px; border-radius: 10px;
-      font-weight: 600; margin-left: 8px;
-    }
+    .check-section h3 { font-family: 'Playfair Display', serif; font-size: 18px; color: #d4af37; margin-bottom: 4px; }
+    .check-progress { font-size: 12px; color: #888; margin-bottom: 12px; }
+    .check-progress .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-weight: 600; margin-left: 8px; }
     .check-progress .badge--done { background: #1a4a2a; color: #4caf50; }
     .check-progress .badge--pending { background: #3a3a1a; color: #d4af37; }
-    .check-grid {
-      display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px;
-    }
-    .check-card {
-      background: #1a1a2e; border: 1px solid #2a2a3e; border-radius: 8px;
-      padding: 12px; cursor: pointer; transition: all 0.2s; user-select: none;
-    }
+    .check-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+    .check-card { background: #1a1a2e; border: 1px solid #2a2a3e; border-radius: 8px; padding: 12px; cursor: pointer; transition: all 0.2s; user-select: none; }
     .check-card:hover { border-color: #555; }
     .check-card--checked { border-color: #2d8a4e; background: #1a2a20; }
     .check-card .check-name { font-weight: 600; font-size: 14px; }
     .check-card .check-detail { font-size: 12px; color: #888; margin-top: 2px; }
     .check-card .check-mark { float: right; font-size: 18px; }
-    .reset-checks-btn {
-      margin-top: 12px; padding: 6px 16px; background: transparent;
-      border: 1px solid #2a2a3e; color: #888; border-radius: 6px; font-size: 12px;
-    }
+    .reset-checks-btn { margin-top: 12px; padding: 6px 16px; background: transparent; border: 1px solid #2a2a3e; color: #888; border-radius: 6px; font-size: 12px; }
     .reset-checks-btn:hover { border-color: #e63946; color: #e63946; }
 
     /* ===== SHOW TIMER ===== */
-    .timer-panel {
-      background: #1a1a2e; border: 1px solid #2a2a3e; border-radius: 12px;
-      padding: 20px; margin-bottom: 20px;
-    }
-    .timer-panel h3 {
-      font-family: 'Playfair Display', serif; font-size: 16px; color: #d4af37;
-      margin-bottom: 12px;
-    }
+    .timer-panel { background: #1a1a2e; border: 1px solid #2a2a3e; border-radius: 12px; padding: 20px; margin-bottom: 20px; }
+    .timer-panel h3 { font-family: 'Playfair Display', serif; font-size: 16px; color: #d4af37; margin-bottom: 12px; }
     .timer-inputs { display: flex; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
     .timer-inputs label { font-size: 12px; color: #888; }
-    .timer-inputs input {
-      width: 80px; padding: 6px 10px; background: #0f0f1e;
-      border: 1px solid #2a2a3e; border-radius: 6px; color: #e0e0e0;
-      font-size: 14px; outline: none;
-    }
+    .timer-inputs input { width: 80px; padding: 6px 10px; background: #0f0f1e; border: 1px solid #2a2a3e; border-radius: 6px; color: #e0e0e0; font-size: 14px; outline: none; }
     .timer-inputs input:focus { border-color: #d4af37; }
     .timer-btns { display: flex; gap: 8px; margin-bottom: 12px; }
-    .timer-btn {
-      padding: 6px 16px; border-radius: 6px; font-size: 13px; border: none;
-      font-weight: 600; transition: opacity 0.2s;
-    }
+    .timer-btn { padding: 6px 16px; border-radius: 6px; font-size: 13px; border: none; font-weight: 600; transition: opacity 0.2s; }
     .timer-btn:disabled { opacity: 0.4; cursor: not-allowed; }
     .timer-btn--start { background: #2d8a4e; color: #fff; }
     .timer-btn--hold { background: #d4af37; color: #0f0f1e; }
     .timer-btn--stop { background: #e63946; color: #fff; }
     .timer-progress { width: 100%; height: 6px; background: #2a2a3e; border-radius: 3px; margin-bottom: 8px; }
     .timer-progress-bar { height: 100%; background: #d4af37; border-radius: 3px; width: 0%; transition: width 0.5s; }
-    .timer-display {
-      display: flex; gap: 16px; font-size: 13px; color: #888;
-      font-family: 'DM Mono', monospace;
-    }
+    .timer-display { display: flex; gap: 16px; font-size: 13px; color: #888; font-family: 'DM Mono', monospace; }
 
     /* ===== PRODUCTION SETTINGS PANEL ===== */
     #production-panel {
@@ -435,53 +321,26 @@
       overflow-y: auto; transition: right 0.3s ease; padding: 24px;
     }
     #production-panel.open { right: 0; }
-    #production-backdrop {
-      position: fixed; inset: 0; background: rgba(0,0,0,0.4);
-      z-index: 240; display: none;
-    }
+    #production-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 240; display: none; }
     #production-backdrop.open { display: block; }
-    .panel-header {
-      display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px;
-    }
-    .panel-header h2 {
-      font-family: 'Playfair Display', serif; font-size: 20px; color: #d4af37;
-    }
-    .panel-close {
-      background: none; border: none; color: #888; font-size: 20px; padding: 4px 8px;
-    }
+    .panel-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
+    .panel-header h2 { font-family: 'Playfair Display', serif; font-size: 20px; color: #d4af37; }
+    .panel-close { background: none; border: none; color: #888; font-size: 20px; padding: 4px 8px; }
     .panel-close:hover { color: #e0e0e0; }
     .panel-section { margin-bottom: 24px; }
-    .panel-section h4 {
-      font-size: 13px; color: #888; text-transform: uppercase; letter-spacing: 0.5px;
-      margin-bottom: 10px; border-bottom: 1px solid #2a2a3e; padding-bottom: 6px;
-    }
-    .panel-section input[type="text"] {
-      width: 100%; padding: 8px 12px; background: #0f0f1e; border: 1px solid #2a2a3e;
-      border-radius: 6px; color: #e0e0e0; font-size: 14px; outline: none;
-    }
+    .panel-section h4 { font-size: 13px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; border-bottom: 1px solid #2a2a3e; padding-bottom: 6px; }
+    .panel-section input[type="text"] { width: 100%; padding: 8px 12px; background: #0f0f1e; border: 1px solid #2a2a3e; border-radius: 6px; color: #e0e0e0; font-size: 14px; outline: none; }
     .panel-section input:focus { border-color: #d4af37; }
-    .join-code-display {
-      font-family: 'DM Mono', monospace; font-size: 20px; color: #d4af37;
-      letter-spacing: 3px; margin-bottom: 8px;
-    }
+    .join-code-display { font-family: 'DM Mono', monospace; font-size: 20px; color: #d4af37; letter-spacing: 3px; margin-bottom: 8px; }
     .join-code-inactive { color: #555; text-decoration: line-through; }
-    .panel-btn {
-      padding: 6px 14px; background: #0f0f1e; border: 1px solid #2a2a3e;
-      color: #ccc; border-radius: 6px; font-size: 12px; transition: all 0.2s;
-    }
+    .panel-btn { padding: 6px 14px; background: #0f0f1e; border: 1px solid #2a2a3e; color: #ccc; border-radius: 6px; font-size: 12px; transition: all 0.2s; }
     .panel-btn:hover { border-color: #d4af37; color: #d4af37; }
     .panel-btn--danger:hover { border-color: #e63946; color: #e63946; }
     .member-list { list-style: none; }
-    .member-item {
-      display: flex; align-items: center; gap: 10px; padding: 8px 0;
-      border-bottom: 1px solid #1a1a3e; font-size: 13px;
-    }
+    .member-item { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid #1a1a3e; font-size: 13px; }
     .member-item .member-email { flex: 1; color: #ccc; }
     .member-item .member-actions { display: flex; gap: 6px; }
-    .member-item .member-actions button {
-      padding: 3px 10px; background: none; border: 1px solid #2a2a3e;
-      color: #888; border-radius: 4px; font-size: 11px; cursor: pointer;
-    }
+    .member-item .member-actions button { padding: 3px 10px; background: none; border: 1px solid #2a2a3e; color: #888; border-radius: 4px; font-size: 11px; cursor: pointer; }
     .member-item .member-actions button:hover { border-color: #d4af37; color: #d4af37; }
     .member-item .member-actions .remove-btn:hover { border-color: #e63946; color: #e63946; }
 
@@ -504,8 +363,7 @@
     }
     .ln-header .back-btn:hover { border-color: #c8a96e; color: #c8a96e; }
     .ln-header .ln-logo {
-      font-family: 'Instrument Serif', serif; font-size: 20px; color: #c8a96e;
-      letter-spacing: 2px;
+      font-family: 'Instrument Serif', serif; font-size: 20px; color: #c8a96e; letter-spacing: 2px;
     }
     .ln-header .show-name {
       font-family: 'DM Sans', sans-serif; font-size: 13px; color: #9a9488;
@@ -518,9 +376,7 @@
     }
     .ln-header-btn:hover { border-color: #c8a96e; color: #c8a96e; }
     .ln-header-btn--active { border-color: #c8a96e; color: #c8a96e; background: rgba(200,169,110,0.1); }
-    .ln-page-nav {
-      display: flex; align-items: center; gap: 8px;
-    }
+    .ln-page-nav { display: flex; align-items: center; gap: 8px; }
     .ln-page-nav .page-num {
       font-family: 'DM Mono', monospace; font-size: 13px; color: #c8a96e; min-width: 60px; text-align: center;
     }
@@ -536,8 +392,7 @@
     /* Line Notes Sidebar */
     .ln-sidebar {
       width: 280px; min-width: 280px; border-right: 1px solid #2e2c29;
-      background: #1a1916; display: flex; flex-direction: column;
-      overflow-y: auto;
+      background: #1a1916; display: flex; flex-direction: column; overflow-y: auto;
     }
     .ln-sidebar-section { padding: 12px; border-bottom: 1px solid #2e2c29; }
     .ln-sidebar-section h5 {
@@ -546,8 +401,7 @@
     }
     .char-item {
       display: flex; align-items: center; gap: 8px; padding: 5px 8px;
-      border-radius: 5px; cursor: pointer; font-size: 13px; color: #e8e4dc;
-      transition: background 0.15s;
+      border-radius: 5px; cursor: pointer; font-size: 13px; color: #e8e4dc; transition: background 0.15s;
     }
     .char-item:hover { background: #232220; }
     .char-item--active { background: #232220; }
@@ -586,9 +440,7 @@
     .note-color-bar { width: 3px; border-radius: 2px; flex-shrink: 0; }
     .note-item-content { flex: 1; min-width: 0; }
     .note-item-header { display: flex; gap: 6px; align-items: center; margin-bottom: 2px; }
-    .note-page {
-      font-family: 'DM Mono', monospace; color: #5c5850; font-size: 10px;
-    }
+    .note-page { font-family: 'DM Mono', monospace; color: #5c5850; font-size: 10px; }
     .note-char-name { color: #c8a96e; font-size: 11px; font-weight: 500; }
     .note-type-label {
       font-family: 'DM Mono', monospace; font-size: 10px; padding: 1px 5px;
@@ -600,8 +452,7 @@
     }
     .note-delete-btn {
       background: none; border: none; color: #5c5850; font-size: 14px;
-      cursor: pointer; padding: 0 4px; opacity: 0; transition: opacity 0.15s;
-      align-self: center;
+      cursor: pointer; padding: 0 4px; opacity: 0; transition: opacity 0.15s; align-self: center;
     }
     .note-item:hover .note-delete-btn { opacity: 1; }
     .note-delete-btn:hover { color: #e63946; }
@@ -615,9 +466,9 @@
       position: relative; display: inline-block; box-shadow: 0 4px 32px rgba(0,0,0,0.5);
     }
     .ln-canvas-container canvas { display: block; }
-    .zones-layer {
-      position: absolute; inset: 0; pointer-events: none;
-    }
+    .zones-layer { position: absolute; inset: 0; pointer-events: none; }
+
+    /* Line zones */
     .line-zone {
       position: absolute; border-radius: 2px; cursor: pointer;
       pointer-events: all; transition: background 0.15s;
@@ -632,20 +483,17 @@
       border-radius: 3px; color: #fff; white-space: nowrap;
     }
 
-    /* Zone editor styles */
+    /* Zone editor panel */
     .zone-editor-panel {
       width: 300px; min-width: 300px; border-left: 1px solid #2e2c29;
-      background: #1a1916; overflow-y: auto; padding: 12px;
-      display: none;
+      background: #1a1916; overflow-y: auto; padding: 12px; display: none;
     }
     .zone-editor-panel.open { display: block; }
     .zone-editor-panel h5 {
       font-size: 11px; color: #5c5850; text-transform: uppercase;
       letter-spacing: 1px; margin-bottom: 8px;
     }
-    .zone-toolbar {
-      display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 12px;
-    }
+    .zone-toolbar { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 12px; }
     .zone-toolbar button {
       padding: 4px 10px; background: #232220; border: 1px solid #2e2c29;
       color: #9a9488; border-radius: 4px; font-size: 11px; transition: all 0.15s;
@@ -661,8 +509,7 @@
     .zone-detail textarea { min-height: 60px; resize: vertical; font-family: 'DM Sans', sans-serif; }
     .zone-list-item {
       display: flex; gap: 6px; align-items: center; padding: 5px 8px;
-      border-radius: 4px; cursor: pointer; font-size: 11px; color: #9a9488;
-      transition: background 0.15s;
+      border-radius: 4px; cursor: pointer; font-size: 11px; color: #9a9488; transition: background 0.15s;
     }
     .zone-list-item:hover { background: #232220; }
     .zone-list-item--selected { background: #232220; border: 1px solid #c8a96e; }
@@ -702,9 +549,7 @@
       box-shadow: 0 8px 32px rgba(0,0,0,0.5); display: none;
     }
     .note-popover.open { display: block; }
-    .popover-chars {
-      display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px;
-    }
+    .popover-chars { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
     .popover-char {
       display: flex; align-items: center; gap: 4px; padding: 4px 10px;
       background: #232220; border: 1px solid #2e2c29; border-radius: 5px;
@@ -712,12 +557,8 @@
     }
     .popover-char:hover { border-color: #c8a96e; }
     .popover-char--active { border-color: #c8a96e; background: rgba(200,169,110,0.1); }
-    .popover-char .shortcut-key {
-      font-family: 'DM Mono', monospace; font-size: 10px; color: #5c5850;
-    }
-    .popover-types {
-      display: flex; gap: 4px; margin-bottom: 10px;
-    }
+    .popover-char .shortcut-key { font-family: 'DM Mono', monospace; font-size: 10px; color: #5c5850; }
+    .popover-types { display: flex; gap: 4px; margin-bottom: 10px; }
     .popover-type {
       padding: 4px 10px; background: #232220; border: 1px solid #2e2c29;
       border-radius: 4px; font-family: 'DM Mono', monospace; font-size: 11px;
@@ -744,13 +585,11 @@
     /* Processing overlay */
     .processing-overlay {
       position: absolute; inset: 0; background: rgba(15,14,12,0.9);
-      display: none; flex-direction: column; align-items: center; justify-content: center;
-      z-index: 550;
+      display: none; flex-direction: column; align-items: center; justify-content: center; z-index: 550;
     }
     .processing-overlay.open { display: flex; }
     .processing-overlay .text {
-      font-family: 'Instrument Serif', serif; font-size: 18px; color: #c8a96e;
-      margin-bottom: 16px;
+      font-family: 'Instrument Serif', serif; font-size: 18px; color: #c8a96e; margin-bottom: 16px;
     }
     .processing-bar { width: 240px; height: 4px; background: #2e2c29; border-radius: 2px; overflow: hidden; }
     .processing-bar-fill { height: 100%; background: #c8a96e; width: 0%; transition: width 0.4s; }
@@ -766,21 +605,14 @@
       padding: 24px; width: 560px; max-width: 90vw; max-height: 80vh; overflow-y: auto;
     }
     .send-notes-card h3 {
-      font-family: 'Instrument Serif', serif; font-size: 20px; color: #c8a96e;
-      margin-bottom: 16px;
+      font-family: 'Instrument Serif', serif; font-size: 20px; color: #c8a96e; margin-bottom: 16px;
     }
     .send-char-section { margin-bottom: 16px; }
-    .send-char-header {
-      display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
-    }
+    .send-char-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
     .send-char-header .char-name { font-weight: 600; color: #e8e4dc; font-size: 14px; }
-    .send-char-header .mail-link {
-      font-size: 12px; color: #c8a96e; cursor: pointer;
-      text-decoration: underline;
-    }
+    .send-char-header .mail-link { font-size: 12px; color: #c8a96e; cursor: pointer; text-decoration: underline; }
     .send-note-row {
-      font-size: 12px; color: #9a9488; padding: 4px 0 4px 16px;
-      border-left: 2px solid #2e2c29;
+      font-size: 12px; color: #9a9488; padding: 4px 0 4px 16px; border-left: 2px solid #2e2c29;
     }
     .send-notes-actions { display: flex; gap: 10px; margin-top: 16px; }
 
@@ -795,17 +627,14 @@
       padding: 24px; width: 340px;
     }
     .char-modal-card h3 {
-      font-family: 'Instrument Serif', serif; font-size: 18px; color: #c8a96e;
-      margin-bottom: 16px;
+      font-family: 'Instrument Serif', serif; font-size: 18px; color: #c8a96e; margin-bottom: 16px;
     }
     .char-modal-card input[type="text"] {
       width: 100%; padding: 8px 12px; background: #232220; border: 1px solid #2e2c29;
       border-radius: 6px; color: #e8e4dc; font-size: 14px; outline: none; margin-bottom: 12px;
     }
     .char-modal-card input:focus { border-color: #c8a96e; }
-    .char-color-grid {
-      display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px;
-    }
+    .char-color-grid { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
     .char-color-swatch {
       width: 28px; height: 28px; border-radius: 50%; cursor: pointer;
       border: 2px solid transparent; transition: border-color 0.15s;
@@ -819,7 +648,95 @@
       position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
       overflow: hidden; clip: rect(0,0,0,0); border: 0;
     }
-  </style>
+
+    /* ===== ZONE EDITOR (dynamic elements) ===== */
+    .ze-zone {
+      position: absolute; border: 1px solid rgba(200,169,110,0.5); background: rgba(200,169,110,0.08);
+      border-radius: 2px; cursor: grab; transition: background 0.1s, border-color 0.1s;
+      display: flex; align-items: flex-start; overflow: hidden;
+    }
+    .ze-zone:hover { background: rgba(200,169,110,0.2); border-color: rgba(200,169,110,0.9); z-index: 5; }
+    .ze-zone.selected { background: rgba(200,169,110,0.18); border-color: #c8a96e; border-width: 1.5px; z-index: 10; }
+    .ze-zone.ze-char-name { border-color: rgba(91,155,212,0.5); background: rgba(91,155,212,0.06); }
+    .ze-zone.ze-char-name:hover { background: rgba(91,155,212,0.15); border-color: rgba(91,155,212,0.9); }
+    .ze-zone.selected.ze-char-name { border-color: #5b9bd4; }
+    .ze-zone.ze-stage-dir { border-color: rgba(154,148,136,0.35); background: rgba(154,148,136,0.04); cursor: default; }
+    .ze-zone.ze-stage-dir:hover { background: rgba(154,148,136,0.09); border-color: rgba(154,148,136,0.6); }
+    .ze-zone.ze-multi-selected { background: rgba(91,155,212,0.18); border-color: #5b9bd4; border-width: 1.5px; }
+    .ze-zone-label {
+      font-family: 'DM Mono', monospace; font-size: 7.5px; color: rgba(200,169,110,0.75);
+      padding: 1px 3px; pointer-events: none; white-space: nowrap; overflow: hidden;
+      text-overflow: ellipsis; max-width: 100%; line-height: 1.2;
+    }
+    .ze-zone.ze-char-name .ze-zone-label { color: rgba(91,155,212,0.8); }
+    .ze-resize {
+      position: absolute; bottom: 0; right: 0; width: 10px; height: 10px; cursor: nwse-resize; z-index: 15;
+    }
+    .ze-resize::after {
+      content: ''; position: absolute; bottom: 2px; right: 2px;
+      width: 5px; height: 5px; border-right: 1.5px solid #c8a96e; border-bottom: 1.5px solid #c8a96e; opacity: 0.7;
+    }
+    .ze-tool-btn {
+      height: 26px; padding: 0 10px; border-radius: 3px; border: 1px solid #3d3a36;
+      background: #232220; color: #9a9488; font-family: 'DM Mono', monospace;
+      font-size: 10px; cursor: pointer; transition: all 0.12s; display: inline-flex; align-items: center; gap: 4px;
+    }
+    .ze-tool-btn:hover { background: #2e2c29; color: #e8e4dc; }
+    .ze-tool-btn.ze-danger:hover { background: rgba(196,92,74,0.2); color: #c45c4a; border-color: #c45c4a; }
+    .ze-tool-btn.ze-accent { background: #c8a96e; color: #0f0e0c; border-color: #c8a96e; }
+    .ze-tool-btn.ze-accent:hover { background: #e8c98e; }
+    .ze-tool-btn kbd {
+      font-family: 'DM Mono', monospace; font-size: 9px; background: #232220;
+      border: 1px solid #3d3a36; border-radius: 3px; padding: 1px 4px; color: #5c5850;
+    }
+    .ze-label { font-family: 'DM Mono', monospace; font-size: 9px; color: #5c5850; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 3px; }
+    .ze-input {
+      width: 100%; background: #232220; border: 1px solid #3d3a36; border-radius: 3px;
+      color: #e8e4dc; font-family: 'DM Mono', monospace; font-size: 12px; padding: 5px 7px; outline: none;
+    }
+    .ze-input:focus { border-color: #c8a96e; }
+    #ze-detail.visible { display: block; }
+    #ze-multi-bar.visible { display: flex; }
+    #ze-saved-badge.visible { opacity: 1; }
+
+    /* Zone editor list items */
+    .ze-list-item {
+      display: flex; align-items: flex-start; gap: 8px; padding: 7px 8px;
+      border-radius: 4px; cursor: pointer; transition: background 0.1s; border-bottom: 1px solid #2e2c29;
+    }
+    .ze-list-item:last-child { border-bottom: none; }
+    .ze-list-item:hover { background: #232220; }
+    .ze-list-item.selected { background: #232220; border-left: 2px solid #c8a96e; padding-left: 6px; }
+    .ze-list-item.ze-cn-item { border-left: 2px solid rgba(91,155,212,0.4); padding-left: 6px; }
+    .ze-list-item.ze-cn-item.selected { border-left-color: #5b9bd4; }
+    .ze-list-item.ze-multi-selected { background: rgba(91,155,212,0.08); border-left: 2px solid #5b9bd4; padding-left: 6px; }
+    .ze-item-idx { font-family: 'DM Mono', monospace; font-size: 10px; color: #5c5850; flex-shrink: 0; min-width: 22px; padding-top: 1px; }
+    .ze-item-body { flex: 1; min-width: 0; }
+    .ze-item-type { font-family: 'DM Mono', monospace; font-size: 9px; color: #5c5850; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 2px; }
+    .ze-item-text { font-family: 'Instrument Serif', serif; font-style: italic; font-size: 11.5px; color: #9a9488; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ze-item-no-text { font-family: 'DM Mono', monospace; font-size: 10px; color: #5c5850; }
+    .ze-item-del { background: none; border: none; color: #5c5850; cursor: pointer; font-size: 14px; padding: 0; opacity: 0; transition: all 0.1s; flex-shrink: 0; }
+    .ze-list-item:hover .ze-item-del { opacity: 1; }
+    .ze-item-del:hover { color: #c45c4a; }
+
+    /* Line zones (notes view) */
+    .line-zone {
+      position: absolute; cursor: crosshair; border-radius: 2px;
+      transition: background 0.08s, outline 0.08s; pointer-events: all;
+    }
+    .line-zone:hover { background: rgba(200,169,110,0.15) !important; outline: 1px solid rgba(200,169,110,0.3); }
+    .line-zone.has-note { background: rgba(200,169,110,0.05); cursor: pointer; }
+    .zone-label {
+      position: absolute; top: 1px; left: 3px; font-family: 'DM Mono', monospace;
+      font-size: 8px; color: rgba(200,169,110,0.65); pointer-events: none; line-height: 1;
+      white-space: nowrap; overflow: hidden; max-width: 90%; text-overflow: ellipsis;
+    }
+    .note-underline { position: absolute; bottom: 0; left: 0; right: 0; height: 2.5px; border-radius: 1px; opacity: 0.75; }
+    .note-tag {
+      position: absolute; right: -38px; top: 50%; transform: translateY(-50%);
+      font-family: 'DM Mono', monospace; font-size: 9px; font-weight: 500;
+      padding: 2px 5px; border-radius: 2px; color: white; white-space: nowrap; opacity: 0.9; pointer-events: none;
+    }</style>
 </head>
 <body>
   <!-- Toast container -->
@@ -879,53 +796,150 @@
   <div id="production-backdrop"></div>
   <div id="production-panel"></div>
 
-  <!-- Line Notes overlay -->
+<!-- Line Notes overlay -->
   <div id="linenotes-overlay">
     <div class="ln-header">
       <button class="back-btn" id="ln-back-btn">← Back</button>
       <span class="ln-logo">CUE</span>
       <span class="show-name" id="ln-show-name"></span>
       <div class="ln-spacer"></div>
-      <div class="ln-page-nav">
-        <button id="ln-prev-page">◄</button>
-        <span class="page-num" id="ln-page-num">1 / 1</span>
-        <button id="ln-next-page">►</button>
+      <div class="ln-page-nav" id="ln-page-nav" style="display:none">
+        <button id="ln-prev-page">‹</button>
+        <input id="ln-page-input" type="number" min="1" value="1" style="width:36px;background:#232220;border:1px solid #3d3a36;color:#e8e4dc;font-family:'DM Mono',monospace;font-size:12px;padding:3px 6px;border-radius:3px;text-align:center;">
+        <span style="color:#5c5850">/ <span id="ln-total-pages">1</span></span>
+        <button id="ln-next-page">›</button>
       </div>
       <button class="ln-header-btn" id="ln-split-btn">2-up</button>
       <button class="ln-header-btn" id="ln-view-notes-btn">Notes</button>
       <button class="ln-header-btn hidden" id="ln-view-zones-btn">Zones</button>
       <button class="ln-header-btn" id="ln-send-btn">Send Notes</button>
     </div>
+
     <div class="ln-body">
+      <!-- SIDEBAR (notes view) -->
       <div class="ln-sidebar" id="ln-sidebar">
         <div class="ln-sidebar-section">
-          <h5>Cast</h5>
+          <h5>Cast <button id="ln-add-char-btn" style="float:right;background:none;border:none;color:#5c5850;cursor:pointer;font-size:16px;line-height:1;">+</button></h5>
           <div id="ln-cast-list"></div>
-          <button class="add-char-btn" id="ln-add-char-btn">+ Add Character</button>
         </div>
         <div class="ln-sidebar-section">
           <h5>Note Type</h5>
           <div class="note-types" id="ln-note-types"></div>
         </div>
-        <div class="ln-sidebar-section" style="flex:1; display:flex; flex-direction:column; overflow:hidden;">
+        <div class="ln-sidebar-section" style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
           <h5>Notes</h5>
           <div class="notes-list" id="ln-notes-list"></div>
         </div>
       </div>
-      <div class="ln-canvas-area" id="ln-canvas-area">
-        <div class="ln-canvas-container" id="ln-canvas-container">
-          <canvas id="ln-canvas"></canvas>
-          <div class="zones-layer" id="ln-zones-layer"></div>
+
+      <!-- NOTES SCRIPT AREA -->
+      <div id="ln-script-area" class="ln-canvas-area" style="display:flex;">
+        <div id="ln-canvas-area"></div>
+        <div id="ln-drop-zone" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;width:100%;min-height:100%;">
+          <div style="border:1.5px dashed #3d3a36;border-radius:12px;padding:60px 80px;text-align:center;">
+            <div style="font-size:48px;margin-bottom:16px;opacity:0.4;">📄</div>
+            <div style="font-family:'Instrument Serif',serif;font-size:28px;color:#e8e4dc;margin-bottom:8px;">Drop your script here</div>
+            <div style="font-size:13px;color:#5c5850;line-height:1.6;margin-bottom:20px;">Text-based PDF · Click to browse</div>
+            <button class="ln-header-btn" id="ln-upload-btn" style="padding:8px 20px;">Choose PDF</button>
+            <input type="file" id="ln-file-input" accept=".pdf" style="display:none;">
+          </div>
         </div>
-        <div class="processing-overlay" id="ln-processing">
+
+        <div id="ln-page-wrapper" style="position:relative;box-shadow:0 8px 48px rgba(0,0,0,0.6);display:none;flex-shrink:0;">
+          <canvas id="ln-canvas" style="display:block;background:#faf8f3;"></canvas>
+          <div id="ln-hit-overlay" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;"></div>
+          <div id="ln-draw-overlay" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:20;">
+            <div id="ln-rubber-band" style="position:absolute;border:1.5px dashed #c8a96e;background:rgba(200,169,110,0.08);border-radius:2px;display:none;"></div>
+          </div>
+        </div>
+
+        <div id="ln-processing" class="processing-overlay">
           <span class="text">Loading script…</span>
           <div class="processing-bar"><div class="processing-bar-fill" id="ln-progress-fill"></div></div>
         </div>
       </div>
-      <div class="zone-editor-panel" id="zone-editor-panel"></div>
+
+      <!-- ZONE EDITOR AREA (separate view with its own canvas) -->
+      <div id="ln-zone-editor-area" style="flex:1;overflow:hidden;display:none;flex-direction:row;">
+        <div id="ze-canvas-panel" style="flex:1;overflow:auto;background:#2a2825;display:flex;flex-direction:column;align-items:center;padding:24px 24px 48px;">
+          <div id="ze-page-wrapper" style="position:relative;box-shadow:0 8px 48px rgba(0,0,0,0.6);flex-shrink:0;cursor:crosshair;">
+            <canvas id="ze-canvas" style="display:block;background:#faf8f3;"></canvas>
+            <div id="ze-edit-overlay" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:all;">
+              <div id="ze-rubber-band" style="position:absolute;border:1.5px dashed #e8c98e;background:rgba(232,201,142,0.1);border-radius:2px;pointer-events:none;display:none;z-index:30;"></div>
+            </div>
+          </div>
+        </div>
+
+        <div id="ze-list-panel" style="width:300px;background:#1a1916;border-left:1px solid #2e2c29;display:flex;flex-direction:column;overflow:hidden;flex-shrink:0;">
+          <div style="padding:14px 16px 10px;border-bottom:1px solid #2e2c29;flex-shrink:0;">
+            <div style="font-family:'Instrument Serif',serif;font-size:16px;color:#e8e4dc;margin-bottom:6px;">Line Zones</div>
+            <div id="ze-list-meta" style="font-family:'DM Mono',monospace;font-size:10px;color:#5c5850;margin-bottom:10px;">0 zones on this page</div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;">
+              <button class="ze-tool-btn" id="ze-btn-reextract">↺ Re-extract</button>
+              <button class="ze-tool-btn" id="ze-btn-draw">+ Draw</button>
+              <button class="ze-tool-btn ze-danger" id="ze-btn-clear">✕ Clear</button>
+              <button class="ze-tool-btn ze-accent" id="ze-btn-save">✓ Save</button>
+            </div>
+          </div>
+          <div id="ze-multi-bar" style="display:none;align-items:center;gap:6px;padding:8px 16px;background:#232220;border-bottom:1px solid #3d3a36;flex-shrink:0;">
+            <span id="ze-multi-count" style="font-family:'DM Mono',monospace;font-size:11px;color:#5b9bd4;flex:1;"></span>
+            <button class="ze-tool-btn" id="ze-btn-multi-char">Char Name <kbd>C</kbd></button>
+            <button class="ze-tool-btn" id="ze-btn-multi-dir">Stage Dir <kbd>S</kbd></button>
+            <button class="ze-tool-btn ze-danger" id="ze-btn-multi-del">Delete All</button>
+            <button class="ze-tool-btn" id="ze-btn-multi-clear">✕</button>
+          </div>
+          <div id="ze-items-list" style="flex:1;overflow-y:auto;padding:6px 8px;"></div>
+          <div id="ze-detail" style="border-top:1px solid #2e2c29;padding:14px 16px;flex-shrink:0;display:none;">
+            <div style="font-family:'DM Mono',monospace;font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:#5c5850;margin-bottom:10px;">Edit Zone</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px;">
+              <div><div class="ze-label">X %</div><input class="ze-input" id="zd-x" type="number" step="0.1"></div>
+              <div><div class="ze-label">Y %</div><input class="ze-input" id="zd-y" type="number" step="0.1"></div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px;">
+              <div><div class="ze-label">W %</div><input class="ze-input" id="zd-w" type="number" step="0.1"></div>
+              <div><div class="ze-label">H %</div><input class="ze-input" id="zd-h" type="number" step="0.1"></div>
+            </div>
+            <div style="margin-bottom:10px;">
+              <div class="ze-label">Text</div>
+              <textarea class="ze-input" id="zd-text" rows="3" style="font-family:'Instrument Serif',serif;font-style:italic;font-size:13px;min-height:50px;resize:vertical;line-height:1.5;"></textarea>
+            </div>
+            <label style="display:flex;align-items:center;gap:7px;margin-bottom:10px;cursor:pointer;">
+              <input type="checkbox" id="zd-charname" style="accent-color:#5b9bd4;">
+              <span style="font-family:'DM Mono',monospace;font-size:11px;color:#9a9488;">Character name <kbd>C</kbd></span>
+            </label>
+            <label style="display:flex;align-items:center;gap:7px;margin-bottom:10px;cursor:pointer;">
+              <input type="checkbox" id="zd-stagedir" style="accent-color:#5b9bd4;">
+              <span style="font-family:'DM Mono',monospace;font-size:11px;color:#9a9488;">Stage direction <kbd>S</kbd></span>
+            </label>
+            <div style="display:flex;gap:6px;justify-content:flex-end;">
+              <button class="ze-tool-btn ze-danger" id="ze-btn-del-zone">Delete Zone</button>
+              <button class="ze-tool-btn ze-accent" id="ze-btn-apply">Apply</button>
+            </div>
+          </div>
+          <div id="ze-saved-badge" style="font-family:'DM Mono',monospace;font-size:10px;color:#6a9e72;display:flex;align-items:center;gap:4px;padding:6px 16px;opacity:0;transition:opacity 0.4s;">✓ saved</div>
+        </div>
+      </div>
     </div>
   </div>
 
+  <!-- POPOVER -->
+  <div id="note-popover" class="note-popover">
+    <div id="popover-title" style="font-family:'DM Mono',monospace;font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:#5c5850;margin-bottom:2px;">Place Note</div>
+    <div id="pop-line-text" class="popover-line-text" style="display:none"></div>
+    <div id="pop-chars" class="popover-chars"></div>
+    <div style="height:1px;background:#2e2c29;"></div>
+    <div id="pop-types" class="popover-types"></div>
+    <div class="popover-btns">
+      <button class="popover-btn popover-btn--cancel" id="pop-cancel-btn">Cancel</button>
+      <button class="popover-btn popover-btn--confirm" id="pop-confirm-btn">Add Note ↵</button>
+    </div>
+  </div>
+
+  <!-- Character modal -->
+  <div class="char-modal" id="char-modal"></div>
+
+  <!-- Send notes modal -->
+  <div class="send-notes-modal" id="send-notes-modal"></div>
   <!-- Note popover -->
   <div class="note-popover" id="note-popover"></div>
 

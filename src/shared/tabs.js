@@ -2,8 +2,10 @@ import { auth } from '../firebase.js';
 import { onLineNotesTabActivated } from '../linenotes/linenotes.js';
 import { renderCastTab } from '../cast/cast.js';
 import { renderSettingsTab } from '../settings/settings.js';
+import { onRunShowTabActivated } from '../RunShow/Runshow.js';
+import { onPropsTabActivated } from '../props/props.js';
 
-let activeTab = 'props';
+let activeTab = 'runshow';
 
 export function initTabs() {
   document.querySelectorAll('.app-tab').forEach(btn => {
@@ -34,6 +36,9 @@ export function switchTab(tabId) {
 
   // Activation side effects
   switch (tabId) {
+    case 'runshow':
+      onRunShowTabActivated();
+      break;
     case 'linenotes':
       onLineNotesTabActivated();
       break;
@@ -44,17 +49,25 @@ export function switchTab(tabId) {
       renderSettingsTab();
       break;
     // 'props' — handled by its own Firestore subscription
+    case 'props':
+      onPropsTabActivated();
+      break;
   }
 }
 
-export function resetToPropsTab() {
-  activeTab = 'props';
+export function resetToRunShowTab() {
+  activeTab = 'runshow';
   document.querySelectorAll('.app-tab').forEach(btn => {
-    btn.classList.toggle('app-tab--active', btn.dataset.tab === 'props');
+    btn.classList.toggle('app-tab--active', btn.dataset.tab === 'runshow');
   });
   document.querySelectorAll('.tab-panel').forEach(panel => {
-    panel.classList.toggle('tab-panel--active', panel.id === 'tab-props');
+    panel.classList.toggle('tab-panel--active', panel.id === 'tab-runshow');
   });
+}
+
+// Kept for backward-compat — now delegates to resetToRunShowTab
+export function resetToPropsTab() {
+  resetToRunShowTab();
 }
 
 export function getActiveTab() {

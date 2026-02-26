@@ -15,20 +15,111 @@ let currentPage = 1;
 let activeTab = 'manage';
 let editingPropId = null;
 let cueRows = [];
-let timerRunning = false;
-let timerHeld = false;
-let timerInterval = null;
-let timerStartTime = 0;
-let timerElapsed = 0;
-let timerTotalPages = 100;
-let timerDuration = 120;
-let timerWarnPages = 5;
 let preChecked = {};
 let postChecked = {};
+
+// Module-level timer variables — used ONLY when state.runSession is null
+let _timerRunning = false;
+let _timerHeld = false;
+let _timerInterval = null;
+let _timerElapsed = 0;
+let _timerTotalPages = 100;
+let _timerDuration = 120;
+let _timerWarnPages = 5;
+let _currentPage = 1;
+
+// Track which prop+enterPage combos have already fired a warn toast this cycle
+const _warnedProps = new Set();
 
 const appView = document.getElementById('app-view');
 const content = document.getElementById('props-content');
 
+/* ─────────────────────────────────────────────────
+   TIMER STATE ACCESSORS
+   Delegate to state.runSession when active;
+   fall back to module-level variables otherwise.
+───────────────────────────────────────────────── */
+function getTimerState() {
+  if (state.runSession) return state.runSession;
+  return {
+    timerRunning: _timerRunning,
+    timerHeld: _timerHeld,
+    timerInterval: _timerInterval,
+    timerElapsed: _timerElapsed,
+    timerTotalPages: _timerTotalPages,
+    timerDuration: _timerDuration,
+    timerWarnPages: _timerWarnPages,
+    currentPage: _currentPage,
+    holdStartTime: null,
+    holdLog: [],
+  };
+}
+
+function setTimerField(key, value) {
+  if (state.runSession) {
+    state.runSession[key] = value;
+  } else {
+    switch (key) {
+      case 'timerRunning':   _timerRunning   = value; break;
+      case 'timerHeld':      _timerHeld      = value; break;
+      case 'timerInterval':  _timerInterval  = value; break;
+      case 'timerElapsed':   _timerElapsed   = value; break;
+      case 'timerTotalPages': _timerTotalPages = value; break;
+      case 'timerDuration':  _timerDuration  = value; break;
+      case 'timerWarnPages': _timerWarnPages  = value; break;
+      case 'currentPage':    _currentPage    = value; break;
+    }
+  }
+}
+
+/* ─────────────────────────────────────────────────
+   TIMER GETTERS (convenience shorthands used inside this module)
+───────────────────────────────────────────────── */
+function timerRunning()   { return getTimerState().timerRunning; }
+function timerHeld()      { return getTimerState().timerHeld; }
+function timerElapsed()   { return getTimerState().timerElapsed; }
+function timerInterval()  { return getTimerState().timerInterval; }
+function timerTotalPages(){ return getTimerState().timerTotalPages; }
+function timerDuration()  { return getTimerState().timerDuration; }
+function timerWarnPages() { return getTimerState().timerWarnPages; }
+function timerCurrentPage(){ return state.runSession ? state.runSession.currentPage : _currentPage; }
+
+/* ─────────────────────────────────────────────────
+   PROP STATUS HELPER — exported for Run Show
+───────────────────────────────────────────────── */
+export function getPropStatus(prop, page) {
+  const cues = prop.cues || [];
+  let location = prop.start || 'SL';
+  let status = 'Off Stage';
+  let activeCue = null;
+  let upcomingEnter = null;
+  if (cues.length > 0) {
+    for (const cue of cues) {
+      if (page >= cue.enterPage && page <= cue.exitPage) { status = 'ON'; location = 'ON'; activeCue = cue; break; }
+      else if (page > cue.exitPage) { location = cue.exitLocation || 'SL'; status = 'Off Stage'; }
+    }
+    if (status !== 'ON') {
+      for (const cue of cues) { if (cue.enterPage > page) { upcomingEnter = cue.enterPage; break; } }
+    }
+  } else {
+    const enters = prop.enters || []; const exits = prop.exits || [];
+    for (let i = 0; i < enters.length; i++) {
+      if (page >= enters[i] && page <= (exits[i] || 9999)) { status = 'ON'; location = 'ON'; break; }
+      else if (page > (exits[i] || 9999)) { location = prop.endLocation || 'SL'; }
+    }
+    if (status !== 'ON') { for (const ep of enters) { if (ep > page) { upcomingEnter = ep; break; } } }
+  }
+  return { location, status, activeCue, upcomingEnter };
+}
+
+/* ─────────────────────────────────────────────────
+   GET PROPS — exported for Run Show stage columns
+───────────────────────────────────────────────── */
+export function getProps() { return props; }
+
+/* ─────────────────────────────────────────────────
+   INIT
+───────────────────────────────────────────────── */
 export function initProps() {
   document.getElementById('props-subtabs').addEventListener('click', e => {
     const tab = e.target.closest('.props-subtab');
@@ -71,19 +162,18 @@ export function showApp() {
   editingPropId = null; cueRows = [];
   subscribeToProps();
   subscribeToCast();
-  // Reset to props tab inline (avoids circular import with tabs.js)
+  // Reset to Run Show tab (the new default)
   document.querySelectorAll('.app-tab').forEach(btn =>
-    btn.classList.toggle('app-tab--active', btn.dataset.tab === 'props')
+    btn.classList.toggle('app-tab--active', btn.dataset.tab === 'runshow')
   );
   document.querySelectorAll('.tab-panel').forEach(panel =>
-    panel.classList.toggle('tab-panel--active', panel.id === 'tab-props')
+    panel.classList.toggle('tab-panel--active', panel.id === 'tab-runshow')
   );
   setActiveTab(isOwner() ? 'manage' : 'view');
 }
 
 export function hideApp() {
   appView.style.display = 'none';
-  // Remove any lingering modals
   document.querySelectorAll('.prop-notes-modal').forEach(m => m.remove());
 }
 
@@ -111,6 +201,10 @@ function renderContent() {
     case 'view': renderViewTab(); break;
     case 'check': renderCheckTab(); break;
   }
+}
+
+export function onPropsTabActivated() {
+  renderContent();
 }
 
 /* ======================== MANAGE PROPS TAB ======================== */
@@ -187,40 +281,23 @@ function renderManageTab() {
     renderContent();
   });
 
-  // Wire cast pickers for carrier fields
   content.querySelectorAll('.cue-row').forEach((row, i) => {
     const conInput = row.querySelector('.cue-con');
     const coffInput = row.querySelector('.cue-coff');
     buildCastPicker(conInput, (sel) => {
-      if (cueRows[i]) {
-        cueRows[i].carrierOn = sel ? sel.castName : '';
-        cueRows[i].carrierOnCastId = sel ? (sel.castId || '') : '';
-      }
+      if (cueRows[i]) { cueRows[i].carrierOn = sel ? sel.castName : ''; cueRows[i].carrierOnCastId = sel ? (sel.castId || '') : ''; }
     }, cueRows[i]?.carrierOn || '');
     buildCastPicker(coffInput, (sel) => {
-      if (cueRows[i]) {
-        cueRows[i].carrierOff = sel ? sel.castName : '';
-        cueRows[i].carrierOffCastId = sel ? (sel.castId || '') : '';
-      }
+      if (cueRows[i]) { cueRows[i].carrierOff = sel ? sel.castName : ''; cueRows[i].carrierOffCastId = sel ? (sel.castId || '') : ''; }
     }, cueRows[i]?.carrierOff || '');
   });
   content.querySelector('#save-prop-btn').addEventListener('click', saveProp);
-  content.querySelector('#cancel-edit-btn')?.addEventListener('click', () => {
-    editingPropId = null; cueRows = []; renderContent();
-  });
+  content.querySelector('#cancel-edit-btn')?.addEventListener('click', () => { editingPropId = null; cueRows = []; renderContent(); });
   content.querySelectorAll('.remove-cue-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      syncCueRowsFromDOM();
-      cueRows.splice(parseInt(btn.dataset.idx), 1);
-      renderContent();
-    });
+    btn.addEventListener('click', () => { syncCueRowsFromDOM(); cueRows.splice(parseInt(btn.dataset.idx), 1); renderContent(); });
   });
-  content.querySelectorAll('.edit-prop-btn').forEach(btn =>
-    btn.addEventListener('click', () => startEdit(btn.dataset.id))
-  );
-  content.querySelectorAll('.delete-prop-btn').forEach(btn =>
-    btn.addEventListener('click', () => deleteProp(btn.dataset.id))
-  );
+  content.querySelectorAll('.edit-prop-btn').forEach(btn => btn.addEventListener('click', () => startEdit(btn.dataset.id)));
+  content.querySelectorAll('.delete-prop-btn').forEach(btn => btn.addEventListener('click', () => deleteProp(btn.dataset.id)));
 }
 
 function syncCueRowsFromDOM() {
@@ -230,7 +307,6 @@ function syncCueRowsFromDOM() {
       cueRows[i].enterPage = row.querySelector('.cue-enter').value;
       cueRows[i].exitPage = row.querySelector('.cue-exit').value;
       cueRows[i].exitLocation = row.querySelector('.cue-loc').value;
-      // carrierOn/Off are kept in sync via picker callbacks
     }
   });
 }
@@ -295,38 +371,14 @@ async function deleteProp(propId) {
   } catch (e) { toast('Failed to delete prop.', 'error'); }
 }
 
-/* ======================== STATUS LOGIC ======================== */
-function getPropStatus(prop, page) {
-  const cues = prop.cues || [];
-  let location = prop.start || 'SL';
-  let status = 'Off Stage';
-  let activeCue = null;
-  let upcomingEnter = null;
-  if (cues.length > 0) {
-    for (const cue of cues) {
-      if (page >= cue.enterPage && page <= cue.exitPage) { status = 'ON'; location = 'ON'; activeCue = cue; break; }
-      else if (page > cue.exitPage) { location = cue.exitLocation || 'SL'; status = 'Off Stage'; }
-    }
-    if (status !== 'ON') {
-      for (const cue of cues) { if (cue.enterPage > page) { upcomingEnter = cue.enterPage; break; } }
-    }
-  } else {
-    const enters = prop.enters || []; const exits = prop.exits || [];
-    for (let i = 0; i < enters.length; i++) {
-      if (page >= enters[i] && page <= (exits[i] || 9999)) { status = 'ON'; location = 'ON'; break; }
-      else if (page > (exits[i] || 9999)) { location = prop.endLocation || 'SL'; }
-    }
-    if (status !== 'ON') { for (const ep of enters) { if (ep > page) { upcomingEnter = ep; break; } } }
-  }
-  return { location, status, activeCue, upcomingEnter };
-}
-
 /* ======================== VIEW SHOW TAB ======================== */
 function renderViewTab() {
+  const page = timerCurrentPage();
+  const warnPgs = timerWarnPages();
   const slProps = [], onProps = [], srProps = [];
   props.forEach(p => {
-    const r = getPropStatus(p, currentPage);
-    const warn = r.upcomingEnter && (r.upcomingEnter - currentPage) <= timerWarnPages && (r.upcomingEnter - currentPage) > 0;
+    const r = getPropStatus(p, page);
+    const warn = r.upcomingEnter && (r.upcomingEnter - page) <= warnPgs && (r.upcomingEnter - page) > 0;
     const item = { prop: p, ...r, warn };
     if (r.status === 'ON') onProps.push(item);
     else if (r.location === 'SL') slProps.push(item);
@@ -347,10 +399,10 @@ function renderViewTab() {
     }).join('');
   };
 
-  content.innerHTML = renderTimerPanel() + `
+  content.innerHTML = `
     <div class="stage-nav">
       <button id="stage-prev">\u25c4 Prev</button>
-      <span class="page-display" id="stage-page-display">Page ${currentPage}</span>
+      <span class="page-display" id="stage-page-display">Page ${page}</span>
       <button id="stage-next">Next \u25ba</button>
     </div>
     <div class="stage-columns">
@@ -359,94 +411,203 @@ function renderViewTab() {
       <div class="stage-col stage-col--sr"><h4>Stage Right</h4>${renderCol(srProps)}</div>
     </div>`;
 
-  content.querySelector('#stage-prev').addEventListener('click', () => { if (currentPage > 1) { currentPage--; renderContent(); } });
-  content.querySelector('#stage-next').addEventListener('click', () => { currentPage++; renderContent(); });
-  wireTimerEvents();
+  content.querySelector('#stage-prev').addEventListener('click', () => {
+    const p = timerCurrentPage();
+    if (p > 1) { setTimerField('currentPage', p - 1); renderContent(); }
+  });
+  content.querySelector('#stage-next').addEventListener('click', () => {
+    setTimerField('currentPage', timerCurrentPage() + 1); renderContent();
+  });
   content.querySelectorAll('.stage-prop').forEach(el =>
     el.addEventListener('click', () => openPropNotesModal(el.dataset.propname))
   );
 }
 
-/* ======================== TIMER ======================== */
-function renderTimerPanel() {
-  const elapsed = timerElapsed;
-  const totalSec = timerDuration * 60;
-  const pct = totalSec > 0 ? Math.min(100, (elapsed / totalSec) * 100) : 0;
-  const elapsedStr = formatTime(elapsed);
-  const remainStr = formatTime(Math.max(0, totalSec - elapsed));
-  const secPerPage = timerTotalPages > 0 ? totalSec / timerTotalPages : 0;
-  const nextTurnSec = secPerPage > 0 ? Math.max(0, secPerPage - (elapsed % secPerPage)) : 0;
-
-  return `<div class="timer-panel">
-    <h3>Show Timer</h3>
-    <div class="timer-inputs">
-      <div><label>Total Pages</label><br/><input type="number" id="timer-pages" min="1" value="${timerTotalPages}" ${timerRunning ? 'disabled' : ''} /></div>
-      <div><label>Duration (min)</label><br/><input type="number" id="timer-duration" min="1" value="${timerDuration}" ${timerRunning ? 'disabled' : ''} /></div>
-      <div><label>Warn Pages</label><br/><input type="number" id="timer-warn" min="0" value="${timerWarnPages}" /></div>
-    </div>
-    <div class="timer-btns">
-      <button class="timer-btn timer-btn--start" id="timer-start" ${timerRunning && !timerHeld ? 'disabled' : ''}>${timerHeld ? 'Resume' : 'Start'}</button>
-      <button class="timer-btn timer-btn--hold" id="timer-hold" ${!timerRunning || timerHeld ? 'disabled' : ''}>Hold Page</button>
-      <button class="timer-btn timer-btn--stop" id="timer-stop" ${!timerRunning && !timerHeld ? 'disabled' : ''}>Stop</button>
-    </div>
-    <div class="timer-progress"><div class="timer-progress-bar" style="width:${pct}%"></div></div>
-    <div class="timer-display">
-      <span>Elapsed: ${elapsedStr}</span>
-      <span>Remaining: ${remainStr}</span>
-      <span>Next turn: ${formatTime(nextTurnSec)}</span>
-    </div>
-  </div>`;
-}
-
-function wireTimerEvents() {
-  content.querySelector('#timer-start')?.addEventListener('click', startTimer);
-  content.querySelector('#timer-hold')?.addEventListener('click', holdTimer);
-  content.querySelector('#timer-stop')?.addEventListener('click', stopTimer);
-  content.querySelector('#timer-warn')?.addEventListener('change', e => {
-    timerWarnPages = parseInt(e.target.value) || 5;
-  });
-}
-
-function startTimer() {
-  const pagesInput = content.querySelector('#timer-pages');
-  const durInput = content.querySelector('#timer-duration');
-  if (pagesInput) timerTotalPages = parseInt(pagesInput.value) || 100;
-  if (durInput) timerDuration = parseInt(durInput.value) || 120;
-
-  if (timerHeld) { timerHeld = false; } else {
-    timerElapsed = 0; currentPage = 1;
-    timerStartTime = Date.now();
-  }
-  timerRunning = true;
-  if (timerInterval) clearInterval(timerInterval);
-  const startRef = Date.now() - timerElapsed * 1000;
-  timerInterval = setInterval(() => {
-    timerElapsed = (Date.now() - startRef) / 1000;
-    const totalSec = timerDuration * 60;
-    const secPerPage = timerTotalPages > 0 ? totalSec / timerTotalPages : totalSec;
-    const newPage = Math.min(timerTotalPages, Math.floor(timerElapsed / secPerPage) + 1);
-    if (newPage !== currentPage) { currentPage = newPage; }
-    if (timerElapsed >= totalSec) { stopTimer(); toast('Show complete!', 'success'); }
-    renderContent();
-  }, 1000);
-  renderContent();
-}
-
-function holdTimer() {
-  timerHeld = true; timerRunning = false;
-  if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
-  renderContent();
-}
-
-function stopTimer() {
-  timerRunning = false; timerHeld = false;
-  if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
-  timerElapsed = 0;
-}
+/* ======================== TIMER ENGINE ======================== */
+// renderTimerPanel() has moved to runshow.js — the engine functions remain here.
 
 function formatTime(s) {
   const m = Math.floor(s / 60); const sec = Math.floor(s % 60);
   return m + ':' + (sec < 10 ? '0' : '') + sec;
+}
+
+export function startTimer(pagesOverride, durationOverride) {
+  const ts = getTimerState();
+  const pages = pagesOverride ?? ts.timerTotalPages;
+  const dur   = durationOverride ?? ts.timerDuration;
+  setTimerField('timerTotalPages', pages);
+  setTimerField('timerDuration', dur);
+
+  if (ts.timerHeld) {
+    // Resume from hold — log the hold event
+    if (state.runSession?.holdStartTime != null) {
+      const holdDur = (Date.now() - state.runSession.holdStartTime) / 1000;
+      state.runSession.holdLog.push({
+        startedAt: state.runSession.holdStartTime,
+        endedAt: Date.now(),
+        durationSeconds: holdDur,
+      });
+      state.runSession.holdStartTime = null;
+    }
+    setTimerField('timerHeld', false);
+  } else {
+    setTimerField('timerElapsed', 0);
+    setTimerField('currentPage', 1);
+    _warnedProps.clear();
+  }
+  setTimerField('timerRunning', true);
+
+  const existingInterval = getTimerState().timerInterval;
+  if (existingInterval) clearInterval(existingInterval);
+
+  const startRef = Date.now() - getTimerState().timerElapsed * 1000;
+  const interval = setInterval(() => {
+    const elapsed = (Date.now() - startRef) / 1000;
+    setTimerField('timerElapsed', elapsed);
+
+    const totalSec = getTimerState().timerDuration * 60;
+    const tp = getTimerState().timerTotalPages;
+    const secPerPage = tp > 0 ? totalSec / tp : totalSec;
+    const newPage = Math.min(tp, Math.floor(elapsed / secPerPage) + 1);
+    const oldPage = getTimerState().currentPage;
+    if (newPage !== oldPage) {
+      setTimerField('currentPage', newPage);
+      _warnedProps.clear(); // clear warn set on page change
+    }
+
+    // Prop warning toasts
+    const warnPgs = getTimerState().timerWarnPages;
+    props.forEach(p => {
+      const r = getPropStatus(p, newPage);
+      if (r.upcomingEnter) {
+        const pagesAway = r.upcomingEnter - newPage;
+        if (pagesAway > 0 && pagesAway <= warnPgs) {
+          const warnKey = `${p.id}:${r.upcomingEnter}`;
+          if (!_warnedProps.has(warnKey)) {
+            _warnedProps.add(warnKey);
+            const msg = `\u26a0\ufe0f ${p.name} \u2014 ${pagesAway} pages (pg ${r.upcomingEnter})`;
+            toast(msg, state.runSession ? 'warn' : 'info');
+          }
+        }
+      }
+    });
+
+    if (elapsed >= totalSec) { stopTimer(); toast('Show complete!', 'success'); }
+
+    // Trigger Run Show re-render if active
+    _notifyRunShow();
+  }, 1000);
+
+  setTimerField('timerInterval', interval);
+  _notifyRunShow();
+}
+
+export function holdTimer() {
+  if (state.runSession) {
+    state.runSession.holdStartTime = Date.now();
+  }
+  setTimerField('timerHeld', true);
+  setTimerField('timerRunning', false);
+  const iv = getTimerState().timerInterval;
+  if (iv) { clearInterval(iv); setTimerField('timerInterval', null); }
+  _notifyRunShow();
+}
+
+export function stopTimer() {
+  const iv = getTimerState().timerInterval;
+  if (iv) { clearInterval(iv); setTimerField('timerInterval', null); }
+  setTimerField('timerRunning', false);
+  setTimerField('timerHeld', false);
+  setTimerField('timerElapsed', 0);
+  _warnedProps.clear();
+  _notifyRunShow();
+}
+
+// Callback hook — set by runshow.js to trigger its re-render
+let _runShowNotify = null;
+export function setRunShowNotifyCallback(fn) { _runShowNotify = fn; }
+function _notifyRunShow() { if (_runShowNotify) _runShowNotify(); }
+
+/* ======================== SESSION LIFECYCLE ======================== */
+
+/**
+ * Start a new run session.
+ * Security: sessions subcollection is readable by all production members;
+ * create is allowed by any member; update/delete restricted to creator or owner.
+ */
+export async function startRunSession(sessionTitle, totalPages, durationMin, warnPages) {
+  const pid = state.activeProduction.id;
+  const uid = state.currentUser.uid;
+
+  // 1. Create Firestore session doc (status: "active")
+  // Security rule note: sessions readable by all production members; create by any member
+  const sessionRef = await addDoc(collection(db, 'productions', pid, 'sessions'), {
+    productionId: pid,
+    title: sessionTitle,
+    date: serverTimestamp(),
+    startedAt: Date.now(),
+    endedAt: null,
+    durationSeconds: 0,
+    holdLog: [],
+    totalHoldSeconds: 0,
+    totalPages: totalPages,
+    targetDurationMinutes: durationMin,
+    warnPages: warnPages,
+    createdBy: uid,
+    scratchpadNotes: '',
+    status: 'active',
+    reportHtml: '',
+    noteCount: 0,
+    notesByActor: {},
+  });
+
+  // 2. Populate state.runSession
+  state.runSession = {
+    sessionId: sessionRef.id,
+    title: sessionTitle,
+    timerRunning: false,
+    timerHeld: false,
+    timerElapsed: 0,
+    timerTotalPages: totalPages,
+    timerDuration: durationMin,
+    timerWarnPages: warnPages,
+    currentPage: 1,
+    timerInterval: null,
+    holdStartTime: null,
+    holdLog: [],
+    scratchpad: '',
+  };
+
+  // 3. Start the timer immediately
+  startTimer(totalPages, durationMin);
+}
+
+/**
+ * End the active run session.
+ * Security: sessions update restricted to creator or owner (createdBy == uid || role == owner)
+ */
+export async function endRunSession(scratchpadText) {
+  if (!state.runSession) return;
+
+  stopTimer();
+
+  const sid = state.runSession.sessionId;
+  const pid = state.activeProduction.id;
+  const elapsed = state.runSession.timerElapsed;
+  const holdLog = state.runSession.holdLog || [];
+  const totalHold = holdLog.reduce((s, h) => s + (h.durationSeconds || 0), 0);
+
+  // Security rule note: sessions update restricted to creator (createdBy == uid) or owner role
+  await updateDoc(doc(db, 'productions', pid, 'sessions', sid), {
+    endedAt: serverTimestamp(),
+    durationSeconds: elapsed,
+    holdLog: holdLog,
+    totalHoldSeconds: totalHold,
+    scratchpadNotes: scratchpadText || '',
+    status: 'ended',
+  });
+
+  state.runSession = null;
 }
 
 /* ======================== PROP NOTES MODAL ======================== */
@@ -499,7 +660,7 @@ function openPropNotesModal(propName) {
 
 /* ======================== PRE/POST CHECK TAB ======================== */
 function renderCheckTab() {
-  const renderCheckGrid = (type, checked, setChecked) => {
+  const renderCheckGrid = (type, checked) => {
     const items = props.map(p => {
       const isPreShow = type === 'pre';
       const loc = isPreShow ? p.start : ((p.cues || []).length > 0 ? p.cues[p.cues.length - 1].exitLocation : (p.endLocation || p.start));
@@ -528,7 +689,7 @@ function renderCheckTab() {
       </div>`;
   };
 
-  content.innerHTML = renderCheckGrid('pre', preChecked, preChecked) + renderCheckGrid('post', postChecked, postChecked);
+  content.innerHTML = renderCheckGrid('pre', preChecked) + renderCheckGrid('post', postChecked);
 
   content.querySelectorAll('.check-card').forEach(card => {
     card.addEventListener('click', () => {

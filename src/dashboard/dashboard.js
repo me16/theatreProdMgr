@@ -7,9 +7,10 @@ import {
   serverTimestamp, collectionGroup
 } from 'firebase/firestore';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
-import { httpsCallable } from 'firebase/functions';
+
 import { showApp, hideApp } from '../props/props.js';
 import { resetLineNotes } from '../linenotes/linenotes.js';
+import { resetRunShow } from '../RunShow/Runshow.js';
 import { isOwner } from '../shared/roles.js';
 
 const dashView = document.getElementById('dashboard-view');
@@ -124,8 +125,10 @@ async function openProduction(id, prod, role) {
 export function backToDashboard() {
   cleanup();
   resetLineNotes();
+  resetRunShow();
   state.activeProduction = null;
   state.activeRole = null;
+  state.runSession = null;
   hideApp();
   showDashboard();
 }
@@ -281,13 +284,42 @@ async function doJoin(backdrop) {
   submitBtn.textContent = 'Joining…';
 
   try {
-    const joinProduction = httpsCallable(functions, 'joinProduction');
-    const result = await joinProduction({ code });
+    // Confirm we actually have a current user before proceeding
+    const user = auth.currentUser;
+    if (!user) throw new Error('Not authenticated. Please refresh and log in again.');
 
-    if (result.data.alreadyMember) {
+    // Force-refresh the ID token. This ensures the Firebase Functions SDK
+    // has a valid, non-expired bearer token to attach to the request.
+    // This is the fix for new users hitting 401 on their first callable invocation.
+    const idToken = await user.getIdToken(/* forceRefresh= */ true);
+
+    // Call the function via raw fetch as a guaranteed fallback — this bypasses
+    // any SDK-level token-attachment bugs and sends the token explicitly.
+    const projectId = import.meta.env.VITE_PROJECT_ID;
+    const region = 'us-central1';
+    const url = `https://${region}-${projectId}.cloudfunctions.net/joinProduction`;
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${idToken}`,
+      },
+      body: JSON.stringify({ data: { code } }),
+    });
+
+    if (!response.ok) {
+      const errBody = await response.json().catch(() => ({}));
+      throw new Error(errBody?.error?.message || `Server error ${response.status}`);
+    }
+
+    const json = await response.json();
+    const result = json.result ?? json;
+
+    if (result.alreadyMember) {
       toast('You are already a member of this production.', 'info');
     } else {
-      toast(`Joined "${escapeHtml(result.data.title)}"!`, 'success');
+      toast(`Joined "${escapeHtml(result.title)}"!`, 'success');
     }
 
     backdrop.remove();

@@ -746,8 +746,122 @@
     .char-color-swatch:hover { border-color: rgba(255,255,255,0.3); }
     .char-color-swatch--selected { border-color: #fff; }
 
+    /* Run Show — hit overlay children need pointer events */
+    #rs-hit-overlay .line-zone { pointer-events: all; }
+    #rs-hit-overlay > div { pointer-events: all; }
+
+    /* Ensure rs-draw-overlay passes through pointer events except rubber band */
+    #rs-draw-overlay { pointer-events: none; }
+    #rs-rubber-band { pointer-events: none; }
+
+    /* ===== RUN SHOW TAB ===== */
+    .rs-layout { display:flex; flex:1; overflow:hidden; }
+    .rs-sidebar {
+      width:280px; min-width:280px; border-right:1px solid #2e2c29;
+      background:#1a1916; display:flex; flex-direction:column; overflow-y:auto;
+    }
+    .rs-sidebar-header {
+      display:flex; align-items:center; gap:10px;
+      padding:8px 12px; border-bottom:1px solid #2e2c29; flex-shrink:0;
+    }
+    .rs-script-area {
+      flex:1; overflow:hidden; display:flex; flex-direction:column;
+      background:#0f0e0c; position:relative;
+    }
+    .rs-controls {
+      width:320px; min-width:280px; border-left:1px solid #2e2c29;
+      background:#1a1916; display:flex; flex-direction:column; overflow-y:auto;
+    }
+    .rs-controls-inner { padding:16px; display:flex; flex-direction:column; gap:14px; }
+
+    /* Run Show — Start button */
+    .rs-start-run-btn {
+      width:100%; padding:12px; background:#2d8a4e; color:#fff; border:none;
+      border-radius:8px; font-size:15px; font-weight:600; cursor:pointer; transition:background 0.2s;
+    }
+    .rs-start-run-btn:hover { background:#38a05e; }
+
+    /* Run Show — session header */
+    .rs-session-header {
+      display:flex; align-items:center; gap:10px;
+      background:#232220; border-radius:8px; padding:10px 14px; flex-shrink:0;
+    }
+    .rs-session-title { flex:1; font-size:13px; color:#e8e4dc; font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .rs-session-elapsed { font-family:'DM Mono',monospace; font-size:14px; color:#c8a96e; }
+    .rs-end-run-btn {
+      padding:6px 14px; background:#6b1520; border:1px solid #e63946; color:#e63946;
+      border-radius:5px; font-size:12px; font-weight:600; cursor:pointer; transition:all 0.2s;
+    }
+    .rs-end-run-btn:hover { background:#e63946; color:#fff; }
+
+    /* Run Show — timer panel */
+    .rs-timer-panel { background:#232220; border-radius:8px; padding:14px; }
+    .rs-timer-progress { width:100%; height:6px; background:#2a2a3e; border-radius:3px; margin-bottom:8px; }
+    .rs-timer-progress-bar { height:100%; background:#d4af37; border-radius:3px; width:0%; transition:width 0.5s; }
+    .rs-timer-display { display:flex; gap:10px; font-size:11px; color:#888; font-family:'DM Mono',monospace; flex-wrap:wrap; margin-bottom:10px; }
+    .rs-timer-btns { display:flex; gap:6px; margin-bottom:8px; }
+    .rs-timer-page { font-family:'DM Mono',monospace; font-size:12px; color:#5c5850; }
+
+    /* Run Show — timer preview (idle) */
+    .rs-timer-preview { display:flex; flex-direction:column; gap:6px; }
+    .rs-timer-field { display:flex; justify-content:space-between; align-items:center; font-size:12px; }
+    .rs-timer-field label { color:var(--text-muted); }
+    .rs-timer-field span { font-family:'DM Mono',monospace; color:var(--text-secondary); }
+
+    /* Run Show — stage columns widget */
+    .rs-stage-columns { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; }
+    .rs-stage-columns .stage-col { border-radius:8px; padding:10px; }
+    .rs-stage-columns .stage-col h4 { font-size:11px; margin-bottom:8px; }
+
+    /* Run Show — scratchpad */
+    .rs-scratchpad-section { display:flex; flex-direction:column; gap:6px; }
+    .rs-scratchpad-input {
+      width:100%; min-height:80px; padding:10px; background:#0f0f1e;
+      border:1px solid #2a2a3e; border-radius:6px; color:#e0e0e0;
+      font-size:13px; resize:vertical; outline:none; font-family:'DM Mono',monospace;
+    }
+    .rs-scratchpad-input:focus { border-color:#d4af37; }
+
+    /* Run Show — FAB */
+    .run-show-fab {
+      position:absolute; bottom:24px; right:24px; z-index:50;
+      padding:12px 20px; background:#c8a96e; color:#0f0e0c;
+      border:none; border-radius:24px; font-size:14px; font-weight:600;
+      box-shadow:0 4px 20px rgba(200,169,110,0.3); cursor:pointer; transition:all 0.2s;
+    }
+    .run-show-fab:hover { background:#e8c98e; transform:translateY(-1px); }
+
+    /* Quick-entry popover */
+    .run-note-popover {
+      position:fixed; bottom:80px; right:24px; z-index:600;
+      background:#1a1916; border:1px solid #3d3a36; border-radius:10px;
+      width:300px; box-shadow:0 12px 40px rgba(0,0,0,0.7);
+      font-family:'DM Sans',sans-serif; overflow:hidden;
+    }
+    .run-note-popover-inner { padding:14px; display:flex; flex-direction:column; gap:10px; }
+    .rnp-page-label { font-family:'DM Mono',monospace; font-size:11px; color:#5c5850; letter-spacing:0.08em; }
+
+    /* Run report modal */
+    .run-report-modal { z-index:700; }
+    .run-report-card {
+      background:#1a1916; border:1px solid #2e2c29; border-radius:12px;
+      width:90vw; max-width:900px; max-height:90vh; display:flex; flex-direction:column;
+    }
+    .run-report-header {
+      display:flex; align-items:center; justify-content:space-between;
+      padding:18px 24px; border-bottom:1px solid #2e2c29; flex-shrink:0;
+    }
+    .run-report-header h2 { font-family:'Instrument Serif',serif; font-size:20px; color:#c8a96e; }
+    .run-report-actions { display:flex; gap:10px; align-items:center; }
+    .run-report-body { flex:1; overflow-y:auto; padding:24px; background:#fff; border-radius:0 0 12px 12px; }
+
+    /* Report row in history */
+    .rs-report-row:hover { border-color:var(--gold) !important; }
+
+    /* Toast warn type */
+    .toast--warn { background:#5a3500; border:1px solid #d4af37; color:#d4af37; }
+
     /* ===== UTILITY ===== */
-    .hidden { display: none !important; }
     .sr-only {
       position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
       overflow: hidden; clip: rect(0,0,0,0); border: 0;
@@ -804,6 +918,16 @@
     #ze-detail.visible { display: block; }
     #ze-multi-bar { display: none; }
     #ze-multi-bar.visible { display: flex; }
+    .ze-select-all-drag-btn {
+      display: block; width: calc(100% - 16px); margin: 8px 8px 4px;
+      padding: 7px 10px; font-family: 'DM Mono', monospace; font-size: 11px;
+      background: #232220; color: #a09880; border: 1px dashed #3d3a36;
+      border-radius: 4px; cursor: pointer; text-align: center; flex-shrink: 0;
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+    }
+    .ze-select-all-drag-btn:hover:not(:disabled) { background: #2e2c29; color: #e8e4dc; border-color: #6a6455; border-style: solid; }
+    .ze-select-all-drag-btn.active { background: rgba(200,169,110,0.12); color: #c8a96e; border-color: #c8a96e; border-style: solid; }
+    .ze-select-all-drag-btn:disabled { opacity: 0.35; cursor: not-allowed; }
     #ze-saved-badge.visible { opacity: 1; }
 
     /* Zone editor list items */
@@ -898,15 +1022,135 @@
     </div>
     <!-- Tab Bar -->
     <div class="app-tabbar">
-      <button class="app-tab app-tab--active" data-tab="props">Props</button>
+      <button class="app-tab app-tab--active" data-tab="runshow">Run Show</button>
+      <button class="app-tab" data-tab="props">Props</button>
       <button class="app-tab" data-tab="linenotes">Line Notes</button>
       <button class="app-tab" data-tab="cast">Cast &amp; Crew</button>
       <button class="app-tab" data-tab="settings">Settings</button>
     </div>
-    <!-- Tab Content Area -->
+    <!-- TAB CONTENT AREA -->
     <div class="app-tab-content">
+      <!-- RUN SHOW TAB (default, first tab) -->
+      <div class="tab-panel tab-panel--active" id="tab-runshow">
+        <div class="rs-layout">
+          <!-- LEFT: Cast list, note type, note log -->
+          <div class="rs-sidebar" id="rs-sidebar">
+            <div class="rs-sidebar-header">
+              <span class="ln-logo">CUE</span>
+              <span class="show-name" id="rs-show-name"></span>
+              <button class="ln-header-btn" id="rs-send-btn" style="margin-left:auto;">Send Notes</button>
+            </div>
+            <div class="ln-sidebar-section">
+              <h5>Cast</h5>
+              <div id="rs-cast-list"></div>
+            </div>
+            <div class="ln-sidebar-section">
+              <h5>Note Type</h5>
+              <div class="note-types" id="rs-note-types"></div>
+            </div>
+            <div class="ln-sidebar-section" style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
+              <h5>Notes</h5>
+              <div class="notes-list" id="rs-notes-list"></div>
+            </div>
+          </div>
+
+          <!-- CENTER: Script PDF, hit overlay, popover, FAB -->
+          <div class="rs-script-area" id="rs-script-area">
+            <!-- Page nav header -->
+            <div class="ln-header" style="flex-shrink:0;">
+              <div class="ln-page-nav" id="rs-page-nav" style="display:none;">
+                <button id="rs-prev-page">&#x2039;</button>
+                <input id="rs-page-input" type="text" value="1" style="width:44px;background:#232220;border:1px solid #3d3a36;color:#e8e4dc;font-family:'DM Mono',monospace;font-size:12px;padding:3px 6px;border-radius:3px;text-align:center;">
+                <span style="color:#5c5850">/ <span id="rs-total-pages">1</span></span>
+                <button id="rs-next-page">&#x203a;</button>
+              </div>
+              <span id="rs-script-offset-badge" style="display:none;font-family:'DM Mono',monospace;font-size:10px;color:#c8a96e;border:1px solid #c8a96e44;border-radius:3px;padding:2px 6px;margin-left:2px;" title="Script page offset active"></span>
+              <button class="ln-header-btn" id="rs-split-btn">2-up</button>
+            </div>
+
+          <!-- Script drop zone / upload (shown only for owners with no script) -->
+            <div id="rs-drop-zone" style="display:none;flex:1;flex-direction:column;align-items:center;justify-content:center;gap:20px;width:100%;min-height:0;padding:24px;">
+              <div style="border:1.5px dashed #3d3a36;border-radius:12px;padding:60px 80px;text-align:center;">
+                <div style="font-size:48px;margin-bottom:16px;opacity:0.4;">&#x1F4C4;</div>
+                <div style="font-family:'Instrument Serif',serif;font-size:28px;color:#e8e4dc;margin-bottom:8px;">Drop your script here</div>
+                <div style="font-size:13px;color:#5c5850;line-height:1.6;margin-bottom:20px;">Text-based PDF &middot; Click to browse</div>
+                <button class="ln-header-btn" id="rs-upload-btn" style="padding:8px 20px;">Choose PDF</button>
+                <input type="file" id="rs-file-input" accept=".pdf" style="display:none;">
+              </div>
+            </div>
+
+            <!-- Script canvas area (flex:1, always present, shows page wrapper when loaded) -->
+            <div id="rs-canvas-area" style="flex:1;overflow:auto;display:flex;align-items:flex-start;justify-content:center;padding:20px;background:#0f0e0c;position:relative;min-height:0;">
+              <div id="rs-page-wrapper" style="position:relative;box-shadow:0 8px 48px rgba(0,0,0,0.6);display:none;flex-shrink:0;">
+                <canvas id="rs-canvas" style="display:block;background:#faf8f3;"></canvas>
+                <div id="rs-hit-overlay" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:10;"></div>
+                <div id="rs-draw-overlay" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:20;">
+                  <div id="rs-rubber-band" style="position:absolute;border:1.5px dashed #c8a96e;background:rgba(200,169,110,0.08);border-radius:2px;display:none;"></div>
+                </div>
+              </div>
+              <div id="rs-processing" class="processing-overlay">
+                <span class="text">Loading script&#x2026;</span>
+                <div class="processing-bar"><div class="processing-bar-fill" id="rs-progress-fill"></div></div>
+              </div>
+            </div>
+
+            <!-- Quick-entry FAB (active run only) -->
+            <button id="run-show-fab" class="run-show-fab hidden">&#x266a; Log Note</button>
+          </div>
+
+          <!-- RIGHT: Timer / session controls, stage columns, scratchpad -->
+          <div class="rs-controls" id="rs-controls">
+            <!-- Rendered dynamically by runshow.js -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick-entry popover (active run only) -->
+      <div id="run-note-popover" class="run-note-popover" style="display:none;">
+        <div class="run-note-popover-inner">
+          <div class="rnp-page-label" id="rnp-page-label">Page 1</div>
+          <div id="rnp-chars" class="popover-chars"></div>
+          <div id="rnp-types" class="popover-types"></div>
+          <input type="text" id="rnp-text" class="form-input" placeholder="Optional note text&#x2026;" maxlength="200" style="margin:6px 8px 0;width:calc(100% - 16px);" />
+          <div class="modal-btns" style="padding:8px;">
+            <button class="modal-btn-cancel" id="rnp-cancel">Cancel</button>
+            <button class="modal-btn-primary" id="rnp-confirm">Add Note</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Run Show note popover (zone-click) -->
+      <div id="rs-note-popover" class="note-popover">
+        <div id="rs-pop-line-text" class="popover-line-text"></div>
+        <div class="popover-section-label" id="rs-pop-cast-label">Cast</div>
+        <div id="rs-pop-chars" class="popover-chars"></div>
+        <div id="rs-pop-types" class="popover-types"></div>
+        <div class="popover-btns">
+          <button class="popover-btn popover-btn--cancel" id="rs-pop-cancel-btn">Cancel</button>
+          <button class="popover-btn popover-btn--confirm" id="rs-pop-confirm-btn">Add Note &#x21b5;</button>
+        </div>
+      </div>
+
+      <!-- Run report modal -->
+      <div id="run-report-modal" class="modal-backdrop run-report-modal" style="display:none;">
+        <div class="run-report-card">
+          <div class="run-report-header">
+            <h2 id="run-report-title">Run Report</h2>
+            <div class="run-report-actions">
+              <button class="settings-btn settings-btn--primary" id="run-report-print">Print / Save PDF &#x2197;</button>
+              <button class="settings-btn" id="run-report-email">Send Email</button>
+              <button class="modal-btn-cancel" id="run-report-close">Close</button>
+            </div>
+          </div>
+          <div id="run-report-body" class="run-report-body"></div>
+        </div>
+      </div>
+
+      <!-- Send notes modal for Run Show -->
+      <div class="send-notes-modal" id="rs-send-notes-modal"></div>
+
       <!-- PROPS TAB -->
-      <div class="tab-panel tab-panel--active" id="tab-props">
+      <div class="tab-panel" id="tab-props">
         <div class="props-subtabs" id="props-subtabs">
           <button class="props-subtab props-subtab--active" data-subtab="manage">Manage Props</button>
           <button class="props-subtab" data-subtab="view">View Show</button>
@@ -914,7 +1158,7 @@
         </div>
         <div class="props-content" id="props-content"></div>
       </div>
-      <!-- LINE NOTES TAB -->
+      <!-- LINE NOTES TAB (Zones only — Notes view moved to Run Show) -->
       <div class="tab-panel" id="tab-linenotes">
     <div class="ln-header">
       <span class="ln-logo">CUE</span>
@@ -922,61 +1166,20 @@
       <div class="ln-spacer"></div>
       <div class="ln-page-nav" id="ln-page-nav" style="display:none">
         <button id="ln-prev-page">‹</button>
-        <input id="ln-page-input" type="number" min="1" value="1" style="width:36px;background:#232220;border:1px solid #3d3a36;color:#e8e4dc;font-family:'DM Mono',monospace;font-size:12px;padding:3px 6px;border-radius:3px;text-align:center;">
+        <input id="ln-page-input" type="text" value="1" style="width:52px;background:#232220;border:1px solid #3d3a36;color:#e8e4dc;font-family:'DM Mono',monospace;font-size:12px;padding:3px 6px;border-radius:3px;text-align:center;">
         <span style="color:#5c5850">/ <span id="ln-total-pages">1</span></span>
         <button id="ln-next-page">›</button>
+        <span id="ln-page-hint" style="font-family:'DM Mono',monospace;font-size:10px;color:#5c5850;display:none;"></span>
       </div>
+      <span id="ln-page-start-badge" style="display:none;font-family:'DM Mono',monospace;font-size:10px;color:#c8a96e;border:1px solid #c8a96e44;border-radius:3px;padding:2px 6px;"></span>
+      <button class="ln-header-btn" id="ln-set-page1-btn" title="Mark the current PDF page as script page 1 (sets the page number offset)">Set p.1 here</button>
       <button class="ln-header-btn" id="ln-split-btn">2-up</button>
-      <button class="ln-header-btn" id="ln-view-notes-btn">Notes</button>
-      <button class="ln-header-btn hidden" id="ln-view-zones-btn">Zones</button>
-      <button class="ln-header-btn" id="ln-send-btn">Send Notes</button>
+      <button class="ln-header-btn ln-header-btn--active" id="ln-view-zones-btn">Zones</button>
     </div>
 
     <div class="ln-body">
-      <!-- SIDEBAR (notes view) -->
-      <div class="ln-sidebar" id="ln-sidebar">
-        <div class="ln-sidebar-section">
-          <h5>Cast</h5>
-          <div id="ln-cast-list"></div>
-        </div>
-        <div class="ln-sidebar-section">
-          <h5>Note Type</h5>
-          <div class="note-types" id="ln-note-types"></div>
-        </div>
-        <div class="ln-sidebar-section" style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
-          <h5>Notes</h5>
-          <div class="notes-list" id="ln-notes-list"></div>
-        </div>
-      </div>
-
-      <!-- NOTES SCRIPT AREA -->
-      <div id="ln-script-area" style="flex:1;overflow:auto;background:#2a2825;display:flex;flex-direction:column;align-items:center;padding:24px 24px 48px;position:relative;">
-        <div id="ln-drop-zone" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;width:100%;min-height:100%;">
-          <div style="border:1.5px dashed #3d3a36;border-radius:12px;padding:60px 80px;text-align:center;">
-            <div style="font-size:48px;margin-bottom:16px;opacity:0.4;">📄</div>
-            <div style="font-family:'Instrument Serif',serif;font-size:28px;color:#e8e4dc;margin-bottom:8px;">Drop your script here</div>
-            <div style="font-size:13px;color:#5c5850;line-height:1.6;margin-bottom:20px;">Text-based PDF · Click to browse</div>
-            <button class="ln-header-btn" id="ln-upload-btn" style="padding:8px 20px;">Choose PDF</button>
-            <input type="file" id="ln-file-input" accept=".pdf" style="display:none;">
-          </div>
-        </div>
-
-        <div id="ln-page-wrapper" style="position:relative;box-shadow:0 8px 48px rgba(0,0,0,0.6);display:none;flex-shrink:0;">
-          <canvas id="ln-canvas" style="display:block;background:#faf8f3;"></canvas>
-          <div id="ln-hit-overlay" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;"></div>
-          <div id="ln-draw-overlay" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:20;">
-            <div id="ln-rubber-band" style="position:absolute;border:1.5px dashed #c8a96e;background:rgba(200,169,110,0.08);border-radius:2px;display:none;"></div>
-          </div>
-        </div>
-
-        <div id="ln-processing" class="processing-overlay">
-          <span class="text">Loading script…</span>
-          <div class="processing-bar"><div class="processing-bar-fill" id="ln-progress-fill"></div></div>
-        </div>
-      </div>
-
-      <!-- ZONE EDITOR AREA (separate view with its own canvas) -->
-      <div id="ln-zone-editor-area" style="flex:1;overflow:hidden;display:none;flex-direction:row;">
+      <!-- ZONE EDITOR AREA (the only view in Line Notes now) -->
+      <div id="ln-zone-editor-area" style="flex:1;overflow:hidden;display:flex;flex-direction:row;">
         <div id="ze-canvas-panel" style="flex:1;overflow:auto;background:#2a2825;display:flex;flex-direction:column;align-items:center;padding:24px 24px 48px;">
           <div id="ze-page-wrapper" style="position:relative;box-shadow:0 8px 48px rgba(0,0,0,0.6);flex-shrink:0;cursor:crosshair;">
             <canvas id="ze-canvas" style="display:block;background:#faf8f3;"></canvas>
@@ -1049,24 +1252,9 @@
     </div>
   </div>
 
-  <!-- POPOVER -->
-  <div id="note-popover" class="note-popover">
-    <div id="pop-line-text" class="popover-line-text"></div>
-    <div class="popover-section-label" id="pop-cast-label">Cast</div>
-    <div id="pop-chars" class="popover-chars"></div>
-    <div id="pop-types" class="popover-types"></div>
-    <div class="popover-btns">
-      <button class="popover-btn popover-btn--cancel" id="pop-cancel-btn">Cancel</button>
-      <button class="popover-btn popover-btn--confirm" id="pop-confirm-btn">Add Note ↵</button>
-    </div>
-  </div>
-
-  <!-- Character modal -->
+  <!-- Character modal (used by Cast tab) -->
   <div class="cast-modal" id="cast-modal"></div>
   <div class="char-modal" id="char-modal"></div>
-
-  <!-- Send notes modal -->
-  <div class="send-notes-modal" id="send-notes-modal"></div>
 
   <script type="module" src="/src/main.js"></script>
 </body>

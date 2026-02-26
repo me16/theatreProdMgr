@@ -57,6 +57,13 @@ service cloud.firestore {
         allow read: if isMember(productionId) || isSuperAdmin();
         allow create, update, delete: if isOwner(productionId) || isSuperAdmin();
       }
+      // Run sessions — readable by all members, create by any member, update/delete by creator or owner
+      match /sessions/{sessionId} {
+        allow read: if isMember(productionId) || isSuperAdmin();
+        allow create: if isMember(productionId) && request.resource.data.createdBy == request.auth.uid;
+        allow update: if resource.data.createdBy == request.auth.uid || isOwner(productionId) || isSuperAdmin();
+        allow delete: if resource.data.createdBy == request.auth.uid || isOwner(productionId) || isSuperAdmin();
+      }
     }
   }
 }

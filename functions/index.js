@@ -1,11 +1,17 @@
-const functions = require('firebase-functions');
+const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const admin = require('firebase-admin');
 admin.initializeApp();
 
-exports.joinProduction = functions.https.onCall(async (data, context) => {
-  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Must be signed in.');
-  const { code } = data;
-  if (!code || typeof code !== 'string') throw new functions.https.HttpsError('invalid-argument', 'Code required.');
+exports.joinProduction = onCall(async (request) => {
+  // v2: auth is at request.auth, not context.auth
+  if (!request.auth) {
+    throw new HttpsError('unauthenticated', 'Must be signed in.');
+  }
+
+  const { code } = request.data;
+  if (!code || typeof code !== 'string') {
+    throw new HttpsError('invalid-argument', 'Code required.');
+  }
 
   const db = admin.firestore();
   const snap = await db.collection('productions')
@@ -13,15 +19,19 @@ exports.joinProduction = functions.https.onCall(async (data, context) => {
     .where('joinCodeActive', '==', true)
     .get();
 
-  if (snap.empty) throw new functions.https.HttpsError('not-found', 'Invalid or expired join code.');
+  if (snap.empty) {
+    throw new HttpsError('not-found', 'Invalid or expired join code.');
+  }
 
   const productionDoc = snap.docs[0];
   const productionId = productionDoc.id;
-  const uid = context.auth.uid;
+  const uid = request.auth.uid;
 
   const memberRef = db.collection('productions').doc(productionId).collection('members').doc(uid);
   const existing = await memberRef.get();
-  if (existing.exists) return { alreadyMember: true, productionId, title: productionDoc.data().title };
+  if (existing.exists) {
+    return { alreadyMember: true, productionId, title: productionDoc.data().title };
+  }
 
   const userRecord = await admin.auth().getUser(uid);
   await memberRef.set({

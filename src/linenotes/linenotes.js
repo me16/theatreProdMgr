@@ -10,73 +10,137 @@ import {
 import { ref, getDownloadURL } from 'firebase/storage';
 import { getCastMembers } from '../cast/cast.js';
 
+/*
+ * linenotes.js now contains ONLY the Zone Editor view.
+ * All note-reading, note-writing, note-display, script rendering, popover,
+ * and send-notes functionality has moved to runshow/runshow.js.
+ *
+ * Exported surface:
+ *   initLineNotes()            — wires zone editor DOM events
+ *   onLineNotesTabActivated()  — called from tabs.js when Line Notes tab opens
+ *   resetLineNotes()           — called from dashboard.js backToDashboard()
+ *   loadScript()               — shared utility used by runshow.js
+ *   loadOrExtractZones()       — shared utility used by runshow.js
+ *   getLineZones()             — shared utility used by runshow.js
+ *   getPdfDoc()                — shared utility used by runshow.js
+ *   getPdfScale()              — shared utility used by runshow.js
+ */
+
 /* ═══════════════════════════════════════════════════════════
-   STATE
+   SHARED PDF / ZONE STATE
    ═══════════════════════════════════════════════════════════ */
 let pdfDoc = null;
 let totalPages = 0;
-let currentPage = 1;
-let splitMode = false;
-let currentHalf = 'L';
-let currentView = 'notes'; // 'notes' | 'zones'
 let pdfScale = 1.4;
-let lineZones = {};        // pageKey → [{x,y,w,h,text,isCharName,isStageDirection}]
-let notes = [];
-// Flat list rebuilt from cast roster on each tab activation
-// Shape: { id, castId, name (character), actorName, color, email }
-let flatChars = [];
-let activeCharIdx = 0;
-let activeNoteType = 'skp';
-let notesUnsub = null;
+let lineZones = {};   // pageKey → [{x,y,w,h,text,isCharName,isStageDirection}]
+let splitMode = false;
+let currentPage = 1;
+let currentHalf = 'L';
 let zoneSaveTimeout = null;
-// Whether the tab has been initialized for this production session
 let lnInitialized = false;
+
+// Script page offset.
+// scriptPageStartPage: which PDF page number is the first script page (1-indexed).
+// scriptPageStartHalf: in split mode, which half of that PDF page is script page 1
+//   ('L' = left half is p.1, 'R' = right half is p.1, '' = non-split/whole page).
+//
+// Split mode example: startPage=2, startHalf='R'
+//   PDF-2R → script p.1,  PDF-3L → script p.2,  PDF-3R → script p.3, ...
+// Non-split example: startPage=3, startHalf=''
+//   PDF-3 → script p.1,   PDF-4 → script p.2, ...
+let scriptPageStartPage = 1;
+let scriptPageStartHalf = '';
 
 // Zone editor state
 let zeSelectedIdx = null;
 let zeMultiSelected = new Set();
 let zeDrawing = false;
 let zeDrawStart = null;
-let zeDragState = null;    // {type:'move'|'resize', startX, startY, origBounds, idx, pw, ph}
-let zeDetailDirty = false;
+let zeDragState = null;
+let zeRenderGen = 0;
 
-// Notes-view keyboard navigation state
-let notesHoveredZoneIdx = null;
+export function getPdfDoc()         { return pdfDoc; }
+export function getPdfScale()       { return pdfScale; }
+export function getLineZones()      { return lineZones; }
+export function getTotalPages()     { return totalPages; }
+export function isSplitMode()       { return splitMode; }
+export function getCurrentPage()    { return currentPage; }
+export function getCurrentHalf()    { return currentHalf; }
+export function getScriptPageStartPage() { return scriptPageStartPage; }
+export function getScriptPageStartHalf() { return scriptPageStartHalf; }
 
-// Notes-view drawing state
-let drawStart = null;
-let drawing = false;
+/**
+ * Compute a signed integer offset (0 = first script page) for a given
+ * (pdfPage, half) position, taking splitMode into account.
+ *
+ * In split mode each half is a separate script page, so we measure distance
+ * in half-page units from the start position.
+ *
+ * In non-split mode each PDF page is one script page; half is ignored.
+ */
+function _scriptOffset(pdfPage, half, inSplitMode) {
+  if (inSplitMode) {
+    // Each PDF page = 2 half-pages.  Map (page, half) to an integer position.
+    const halfPos = (p, h) => (p - 1) * 2 + (h === 'R' ? 1 : 0);
+    return halfPos(pdfPage, half || 'L') - halfPos(scriptPageStartPage, scriptPageStartHalf || 'L');
+  } else {
+    return pdfPage - scriptPageStartPage;
+  }
+}
 
-// Popover state
-let popoverOpen = false;
-let _popCloseGuard = false;
-let pendingNote = null;
+/**
+ * Convert a (pdfPage, half) position to a human-readable script page label.
+ *
+ * In split mode: each half is a distinct page number (no L/R suffix in the label).
+ *   e.g. startPage=2, startHalf='R' → 2R→"1", 3L→"2", 3R→"3"
+ * In non-split mode: each PDF page is one numbered page.
+ *   e.g. startPage=3 → PDF-3→"1", PDF-4→"2"
+ *
+ * Pages before the start get "i-N" labels (pre-script / front matter).
+ *
+ * @param {number} pdfPage   1-indexed PDF page number
+ * @param {string} [half]    'L' | 'R' | '' — only relevant in split mode
+ * @param {boolean} [inSplit] override splitMode (defaults to module splitMode)
+ * @returns {string}
+ */
+export function pdfPageToScriptLabel(pdfPage, half, inSplit) {
+  const useSplit = inSplit !== undefined ? inSplit : splitMode;
+  const offset = _scriptOffset(pdfPage, half || '', useSplit);
+  if (offset < 0) return 'i' + offset;   // e.g. "i-1", "i-2"
+  return String(offset + 1);             // e.g. "1", "2", "42"
+}
 
-const NOTE_TYPES_MAP = {
-  'skp': 'Skipped',
-  'para': 'Paraphrase',
-  'line': 'Called line',
-  'add': 'Added words',
-  'gen': 'General',
-};
-const NOTE_TYPES = [
-  { key: 'skp', label: 'Skip', color: '#e63946' },
-  { key: 'para', label: 'Para', color: '#e89b3e' },
-  { key: 'line', label: 'Line', color: '#5b9bd4' },
-  { key: 'add', label: 'Add', color: '#6b8f4e' },
-  { key: 'gen', label: 'Gen', color: '#9b7bc8' },
-];
-const COLORS = [
-  '#c45c4a','#d4844a','#c8a96e','#7ab87a','#5b9bd4',
-  '#8b6cc4','#c46ca4','#6ab4b4','#d4b44a','#7a9ab4',
-];
-
-/* ═══════════════════════════════════════════════════════════
-   DOM REFS
-   ═══════════════════════════════════════════════════════════ */
-const popoverEl      = document.getElementById('note-popover');
-const charModal      = document.getElementById('char-modal');
-const sendModal      = document.getElementById('send-notes-modal');
+/**
+ * Parse a script page number (integer string like "1", "42", or "i-1")
+ * back to a { pdfPage, half } object.
+ * Returns null if unparseable.
+ *
+ * In split mode the returned half will be 'L' or 'R'.
+ * In non-split mode half will be ''.
+ */
+export function scriptLabelToPosition(label, inSplit) {
+  const useSplit = inSplit !== undefined ? inSplit : splitMode;
+  const s = String(label).trim();
+  let scriptNum;
+  if (s.startsWith('i')) {
+    scriptNum = parseInt(s.slice(1)); // negative number
+    if (isNaN(scriptNum)) return null;
+  } else {
+    scriptNum = parseInt(s);
+    if (isNaN(scriptNum)) return null;
+    // convert 1-based label to 0-based offset
+    scriptNum = scriptNum - 1;
+  }
+  if (useSplit) {
+    const startHalfPos = (scriptPageStartPage - 1) * 2 + (scriptPageStartHalf === 'R' ? 1 : 0);
+    const targetHalfPos = startHalfPos + scriptNum;
+    const pdfPage = Math.floor(targetHalfPos / 2) + 1;
+    const half = (targetHalfPos % 2 === 0) ? 'L' : 'R';
+    return { pdfPage, half };
+  } else {
+    return { pdfPage: scriptPageStartPage + scriptNum, half: '' };
+  }
+}
 
 /* ═══════════════════════════════════════════════════════════
    HELPERS
@@ -86,175 +150,167 @@ function pageLabel(num, half)   { return splitMode ? `${num}${half}` : `${num}`;
 function pk()                   { return pageZoneKey(currentPage, currentHalf); }
 
 /* ═══════════════════════════════════════════════════════════
-   INIT + OPEN/CLOSE
+   INIT
    ═══════════════════════════════════════════════════════════ */
 export function initLineNotes() {
-  document.getElementById('ln-prev-page').addEventListener('click', () => changePage(-1));
-  document.getElementById('ln-next-page').addEventListener('click', () => changePage(1));
-  document.getElementById('ln-split-btn').addEventListener('click', toggleSplitMode);
-  document.getElementById('ln-view-notes-btn').addEventListener('click', () => switchView('notes'));
-  document.getElementById('ln-view-zones-btn').addEventListener('click', () => switchView('zones'));
-  document.getElementById('ln-send-btn').addEventListener('click', openSendNotes);
-
-  // Notes view: rubber band on draw overlay
-  document.getElementById('ln-draw-overlay').addEventListener('mousedown', notesDrawDown);
-
   // Zone editor: rubber band + drag on zone-edit-overlay
   const zeOvl = document.getElementById('ze-edit-overlay');
-  zeOvl.addEventListener('mousedown', zeOverlayMouseDown);
+  zeOvl?.addEventListener('mousedown', zeOverlayMouseDown);
 
-  // Global mouse move/up for both views
+  // Global mouse move/up for zone editor
   document.addEventListener('mousemove', globalMouseMove);
   document.addEventListener('mouseup', globalMouseUp);
 
-  // Hit overlay click-to-close popover
-  document.getElementById('ln-hit-overlay').addEventListener('click', e => {
-    if (e.target === document.getElementById('ln-hit-overlay')) closePopover();
-  });
-
-  // Popover buttons
-  document.getElementById('pop-cancel-btn').addEventListener('click', e => { e.stopPropagation(); closePopover(); });
-  document.getElementById('pop-confirm-btn').addEventListener('click', e => { e.stopPropagation(); confirmNote(); });
-
-  // Click outside to close modals
-  document.addEventListener('click', e => {
-    if (_popCloseGuard) return;
-    if (popoverOpen && !popoverEl.contains(e.target)) closePopover();
-    if (charModal.classList.contains('open') && e.target === charModal) charModal.classList.remove('open');
-    if (sendModal.classList.contains('open') && e.target === sendModal) sendModal.classList.remove('open');
-  });
-
-  document.addEventListener('keydown', handleKeydown);
+  // Wire zone editor toolbar
+  setTimeout(() => wireZeToolbar(), 0);
 }
 
-function buildFlatChars() {
-  const cast = getCastMembers();
-  flatChars = [];
-  cast.forEach(member => {
-    const chars = member.characters?.length > 0
-      ? member.characters
-      : [member.name]; // fallback: actor name as character
-    chars.forEach(charName => {
-      flatChars.push({
-        id: `${member.id}::${charName}`,  // stable composite key
-        castId: member.id,
-        name: charName,
-        actorName: member.name,
-        color: member.color || '#888',
-        email: member.email || '',
-      });
-    });
-  });
-  if (activeCharIdx >= flatChars.length) activeCharIdx = 0;
-}
-
-export function onLineNotesTabActivated() {
-  buildFlatChars();
+export async function onLineNotesTabActivated() {
   if (!lnInitialized) {
     lnInitialized = true;
-    currentView = 'notes';
     currentPage = 1;
     splitMode = false;
     currentHalf = 'L';
-    notes = [];
     lineZones = {};
     pdfDoc = null;
     totalPages = 0;
     zeSelectedIdx = null;
     zeMultiSelected.clear();
-    notesHoveredZoneIdx = null;
-    renderGen = 0;
     zeRenderGen = 0;
-    document.getElementById('ln-view-zones-btn')
-      .classList.toggle('hidden', !isOwner());
+    // Read page offset fields directly from Firestore so all production members
+    // automatically share the same p.1 setting without needing to re-select it.
+    // We read fresh from the production doc rather than relying on whatever fields
+    // dashboard.js chose to map onto state.activeProduction.
+    await loadScriptPageOffset();
     document.getElementById('ln-show-name').textContent =
       state.activeProduction?.title || '';
-    subscribeToNotes();
     loadScript();
-    switchView('notes');
   }
-  renderSidebar();
+  // The Line Notes tab now opens directly to the zones view
+  switchToZonesView();
+}
+
+/** Fetch scriptPageStart fields from Firestore and apply them locally. */
+async function loadScriptPageOffset() {
+  const pid = state.activeProduction?.id;
+  if (!pid) return;
+  try {
+    const snap = await getDoc(doc(db, 'productions', pid));
+    if (snap.exists()) {
+      const data = snap.data();
+      scriptPageStartPage = data.scriptPageStartPage || 1;
+      scriptPageStartHalf = data.scriptPageStartHalf || '';
+      // Keep state.activeProduction in sync so Runshow can read it too
+      state.activeProduction.scriptPageStartPage = scriptPageStartPage;
+      state.activeProduction.scriptPageStartHalf = scriptPageStartHalf;
+    }
+  } catch(e) {
+    console.warn('Could not load scriptPageOffset:', e);
+    // Fall back to whatever is already on state.activeProduction
+    scriptPageStartPage = state.activeProduction?.scriptPageStartPage || 1;
+    scriptPageStartHalf = state.activeProduction?.scriptPageStartHalf || '';
+  }
 }
 
 export function resetLineNotes() {
   lnInitialized = false;
-  if (notesUnsub) { notesUnsub(); notesUnsub = null; }
   pdfDoc = null;
-  notes = [];
-  flatChars = [];
   lineZones = {};
 }
 
 /* ═══════════════════════════════════════════════════════════
-   VIEW SWITCHING
+   ZONES VIEW (the only view in Line Notes now)
    ═══════════════════════════════════════════════════════════ */
-function switchView(view) {
-  currentView = view;
-  const sidebar   = document.getElementById('ln-sidebar');
-  const scriptArea = document.getElementById('ln-script-area');
-  const zoneArea  = document.getElementById('ln-zone-editor-area');
-
-  if (view === 'notes') {
-    sidebar.style.display = 'flex';
-    scriptArea.style.display = 'flex';
-    zoneArea.style.display = 'none';
-    if (pdfDoc) renderPage(currentPage);
-  } else {
-    sidebar.style.display = 'none';
-    scriptArea.style.display = 'none';
-    zoneArea.style.display = 'flex';
-    if (pdfDoc) renderZoneEditorPage(currentPage);
-  }
-  updateViewButtons();
+function switchToZonesView() {
+  const zoneArea = document.getElementById('ln-zone-editor-area');
+  if (zoneArea) zoneArea.style.display = 'flex';
+  updatePageStartBadge();
+  if (pdfDoc) renderZoneEditorPage(currentPage);
 }
 
-function updateViewButtons() {
-  document.getElementById('ln-view-notes-btn').classList.toggle('ln-header-btn--active', currentView === 'notes');
-  document.getElementById('ln-view-zones-btn').classList.toggle('ln-header-btn--active', currentView === 'zones');
+/** Updates the "page offset" indicator badge in the header (both LN and RS tabs). */
+function updatePageStartBadge() {
+  // Line Notes badge
+  const badge = document.getElementById('ln-page-start-badge');
+  const isDefault = scriptPageStartPage === 1 && scriptPageStartHalf === '';
+  if (badge) {
+    if (isDefault) {
+      badge.style.display = 'none';
+    } else {
+      const halfStr = scriptPageStartHalf ? scriptPageStartHalf : '';
+      badge.textContent = `PDF p.${scriptPageStartPage}${halfStr} = Script p.1`;
+      badge.style.display = '';
+    }
+  }
+  // Run Show badge (may not exist in LN context but harmless)
+  const rsBadge = document.getElementById('rs-script-offset-badge');
+  if (rsBadge) {
+    if (isDefault) {
+      rsBadge.style.display = 'none';
+    } else {
+      const halfStr = scriptPageStartHalf ? scriptPageStartHalf : '';
+      rsBadge.textContent = `PDF p.${scriptPageStartPage}${halfStr} = p.1`;
+      rsBadge.style.display = '';
+    }
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════
-   SCRIPT LOADING
+   SCRIPT LOADING  (shared with runshow.js via exports)
    ═══════════════════════════════════════════════════════════ */
-async function loadScript() {
+export async function loadScript(canvasId, hitOverlayId, progressFillId, dropZoneId, pageWrapperId, pageNavId, processingId, totalPagesId) {
+  // When called from linenotes (zone editor), use ln- prefixed IDs
+  const _processingId = processingId || 'ln-processing';
+  const _progressFillId = progressFillId || 'ln-progress-fill';
+  const _dropZoneId = dropZoneId || 'ln-drop-zone';
+  const _pageWrapperId = pageWrapperId || 'ze-page-wrapper';
+  const _pageNavId = pageNavId || 'ln-page-nav';
+  const _totalPagesId = totalPagesId || 'ln-total-pages';
+
   const scriptPath = state.activeProduction?.scriptPath;
   if (!scriptPath) {
     if (isOwner()) showScriptUploadPrompt();
-    else document.getElementById('ln-canvas-area').innerHTML = '<div style="color:#5c5850;text-align:center;padding:60px;">Script not yet uploaded by the production owner.</div>';
     return;
   }
-  showProcessing('Loading script\u2026');
+  showProcessing('Loading script\u2026', _processingId, _progressFillId);
   try {
     const url = await getDownloadURL(ref(storage, scriptPath));
     const pdfjsLib = window.pdfjsLib;
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
     const loadingTask = pdfjsLib.getDocument({ url });
     loadingTask.onProgress = p => {
-      if (p.total > 0) document.getElementById('ln-progress-fill').style.width = Math.round((p.loaded / p.total) * 100) + '%';
+      const fill = document.getElementById(_progressFillId);
+      if (p.total > 0 && fill) fill.style.width = Math.round((p.loaded / p.total) * 100) + '%';
     };
     pdfDoc = await loadingTask.promise;
     totalPages = pdfDoc.numPages;
-    document.getElementById('ln-total-pages').textContent = totalPages;
+    const totalEl = document.getElementById(_totalPagesId);
+    if (totalEl) totalEl.textContent = totalPages;
     if (!state.activeProduction.scriptPageCount && isOwner()) {
       try { await updateDoc(doc(db, 'productions', state.activeProduction.id), { scriptPageCount: totalPages }); } catch(e) {}
     }
-    hideProcessing();
-    document.getElementById('ln-drop-zone').style.display = 'none';
-    document.getElementById('ln-page-wrapper').style.display = 'block';
-    document.getElementById('ln-page-nav').style.display = 'flex';
-    await renderPage(currentPage);
+    hideProcessing(_processingId);
+    const dz = document.getElementById(_dropZoneId);
+    if (dz) dz.style.display = 'none';
+    const pw = document.getElementById(_pageWrapperId);
+    if (pw) pw.style.display = 'block';
+    const pn = document.getElementById(_pageNavId);
+    if (pn) pn.style.display = 'flex';
+    if (currentPage) await renderZoneEditorPage(currentPage);
   } catch(e) {
     console.error('Script load error:', e);
-    hideProcessing();
+    hideProcessing(_processingId);
     toast('Failed to load script: ' + e.message, 'error');
   }
 }
 
 function showScriptUploadPrompt() {
+  // For zone editor (owner only in Line Notes tab)
   const dz = document.getElementById('ln-drop-zone');
+  if (!dz) return;
   dz.style.display = 'flex';
-  dz.querySelector('#ln-upload-btn').addEventListener('click', () => dz.querySelector('#ln-file-input').click());
-  dz.querySelector('#ln-file-input').addEventListener('change', async function() {
+  dz.querySelector('#ln-upload-btn')?.addEventListener('click', () => dz.querySelector('#ln-file-input')?.click());
+  dz.querySelector('#ln-file-input')?.addEventListener('change', async function() {
     const file = this.files[0];
     if (!file || file.type !== 'application/pdf') { toast('Select a PDF.', 'error'); return; }
     const { uploadBytesResumable } = await import('firebase/storage');
@@ -263,7 +319,7 @@ function showScriptUploadPrompt() {
     showProcessing('Uploading\u2026');
     const task = uploadBytesResumable(storageRef, file);
     task.on('state_changed',
-      s => { document.getElementById('ln-progress-fill').style.width = Math.round((s.bytesTransferred / s.totalBytes) * 100) + '%'; },
+      s => { const el = document.getElementById('ln-progress-fill'); if (el) el.style.width = Math.round((s.bytesTransferred / s.totalBytes) * 100) + '%'; },
       () => { hideProcessing(); toast('Upload failed.', 'error'); },
       async () => {
         await updateDoc(doc(db, 'productions', pid), { scriptPath: 'productions/' + pid + '/script.pdf', scriptPageCount: null });
@@ -275,97 +331,21 @@ function showScriptUploadPrompt() {
   });
 }
 
-function showProcessing(msg) {
-  const el = document.getElementById('ln-processing');
-  el.style.display = 'flex';
-  el.querySelector('.text').textContent = msg;
-  document.getElementById('ln-progress-fill').style.width = '0%';
+function showProcessing(msg, id, fillId) {
+  const el = document.getElementById(id || 'ln-processing');
+  if (el) { el.style.display = 'flex'; el.querySelector('.text').textContent = msg; }
+  const fill = document.getElementById(fillId || 'ln-progress-fill');
+  if (fill) fill.style.width = '0%';
 }
-function hideProcessing() { document.getElementById('ln-processing').style.display = 'none'; }
-
-/* ═══════════════════════════════════════════════════════════
-   SPLIT MODE
-   ═══════════════════════════════════════════════════════════ */
-function toggleSplitMode() {
-  splitMode = !splitMode;
-  currentHalf = 'L';
-  lineZones = {};
-  document.getElementById('ln-split-btn').classList.toggle('ln-header-btn--active', splitMode);
-  toast(splitMode ? '2-up split ON' : '2-up split OFF');
-  if (pdfDoc) {
-    if (currentView === 'notes') renderPage(currentPage);
-    else renderZoneEditorPage(currentPage);
-  }
+function hideProcessing(id) {
+  const el = document.getElementById(id || 'ln-processing');
+  if (el) el.style.display = 'none';
 }
 
 /* ═══════════════════════════════════════════════════════════
-   PAGE NAVIGATION
+   ZONE EXTRACTION  (shared with runshow.js via exports)
    ═══════════════════════════════════════════════════════════ */
-async function changePage(delta) {
-  if (!pdfDoc) return;
-  if (splitMode) {
-    if (delta > 0) {
-      if (currentHalf === 'L') { currentHalf = 'R'; } else { if (currentPage >= totalPages) return; currentPage++; currentHalf = 'L'; }
-    } else {
-      if (currentHalf === 'R') { currentHalf = 'L'; } else { if (currentPage <= 1) return; currentPage--; currentHalf = 'R'; }
-    }
-  } else {
-    const next = currentPage + delta;
-    if (next < 1 || next > totalPages) return;
-    currentPage = next;
-  }
-  document.getElementById('ln-page-input').value = currentPage;
-  if (currentView === 'notes') await renderPage(currentPage);
-  else await renderZoneEditorPage(currentPage);
-}
-
-/* ═══════════════════════════════════════════════════════════
-   NOTES VIEW — RENDER PAGE
-   ═══════════════════════════════════════════════════════════ */
-let renderGen = 0; // incremented on each renderPage call to cancel stale renders
-
-async function renderPage(num) {
-  const gen = ++renderGen;
-  closePopover();
-  notesHoveredZoneIdx = null;
-  const hitOverlay = document.getElementById('ln-hit-overlay');
-  hitOverlay.innerHTML = '';
-
-  const page = await pdfDoc.getPage(num);
-  if (gen !== renderGen) return; // stale render — a newer call has taken over
-
-  const viewport = page.getViewport({ scale: pdfScale });
-  const canvas = document.getElementById('ln-canvas');
-  const ctx = canvas.getContext('2d');
-
-  if (splitMode) {
-    const halfW = Math.floor(viewport.width / 2);
-    canvas.width = halfW; canvas.height = viewport.height;
-    const offsetX = currentHalf === 'L' ? 0 : halfW;
-    ctx.save(); ctx.translate(-offsetX, 0);
-    await page.render({ canvasContext: ctx, viewport }).promise;
-    ctx.restore();
-  } else {
-    canvas.width = viewport.width; canvas.height = viewport.height;
-    await page.render({ canvasContext: ctx, viewport }).promise;
-  }
-  if (gen !== renderGen) return;
-
-  document.getElementById('ln-page-input').value = num;
-  const zKey = pk();
-  if (!lineZones[zKey]) await loadOrExtractZones(page, num, viewport, zKey);
-  if (gen !== renderGen) return;
-
-  hitOverlay.innerHTML = ''; // clear again after any async zone load
-  renderLineZones(zKey);
-  renderNoteMarkers(num, currentHalf);
-}
-
-/* ═══════════════════════════════════════════════════════════
-   ZONE EXTRACTION
-   ═══════════════════════════════════════════════════════════ */
-async function loadOrExtractZones(page, num, viewport, zKey) {
-  // Try Firestore first
+export async function loadOrExtractZones(page, num, viewport, zKey) {
   const pid = state.activeProduction.id;
   try {
     const zoneDoc = await getDoc(doc(db, 'productions', pid, 'zones', zKey));
@@ -375,7 +355,6 @@ async function loadOrExtractZones(page, num, viewport, zKey) {
     }
   } catch(e) { /* fall through */ }
 
-  // Extract from PDF text layer
   showProcessing(`Extracting text from page ${num}\u2026`);
   try {
     const textContent = await page.getTextContent();
@@ -386,7 +365,6 @@ async function loadOrExtractZones(page, num, viewport, zKey) {
       lineZones[zKey] = generateFallbackZones(viewport.height);
       toast(`Page ${num}: no text layer — fallback zones generated.`);
     }
-    // Auto-save for owners
     if (isOwner()) firebaseSaveZones(zKey);
   } catch(e) {
     lineZones[zKey] = generateFallbackZones(viewport.height);
@@ -548,325 +526,22 @@ function generateFallbackZones(canvasHeight) {
 }
 
 /* ═══════════════════════════════════════════════════════════
-   NOTES VIEW — RENDER LINE ZONES + NOTE MARKERS
-   ═══════════════════════════════════════════════════════════ */
-function renderLineZones(zKey) {
-  const hitOverlay = document.getElementById('ln-hit-overlay');
-  const zones = lineZones[zKey] || [];
-  const existingZoneIdxs = new Set(
-    notes.filter(n => n.page === currentPage && n.half === (splitMode ? currentHalf : ''))
-      .map(n => n.zoneIdx).filter(i => i !== undefined)
-  );
-
-  zones.forEach((zone, idx) => {
-    if (zone.isCharName) return;
-    if (zone.isStageDirection) {
-      const sd = document.createElement('div');
-      sd.style.cssText = `position:absolute;left:${zone.x}%;top:${zone.y}%;width:${zone.w}%;height:${Math.max(zone.h,1.5)}%;border-left:2px solid rgba(154,148,136,0.3);pointer-events:none;`;
-      hitOverlay.appendChild(sd);
-      return;
-    }
-    const div = document.createElement('div');
-    div.className = 'line-zone' + (existingZoneIdxs.has(idx) ? ' has-note' : '');
-    div.style.left = Math.max(0, zone.x - 0.5) + '%'; div.style.top = zone.y + '%';
-    div.style.width = Math.min(100, zone.w + 1) + '%'; div.style.height = Math.max(zone.h + 0.6, 2.2) + '%';
-    div.dataset.zone = idx;
-    div.title = zone.text ? zone.text.substring(0, 80) : '';
-    div.addEventListener('click', e => {
-      e.stopPropagation();
-      const existing = notes.find(n => n.page === currentPage && (splitMode ? n.half === currentHalf : true) && n.zoneIdx === idx);
-      if (existing) openEditPopover(e, existing);
-      else openPopover(e, currentPage, currentHalf, idx, zone);
-    });
-    const label = document.createElement('span');
-    label.className = 'zone-label';
-    label.textContent = zone.text ? zone.text.substring(0, 40) : `zone ${idx}`;
-    div.appendChild(label);
-    hitOverlay.appendChild(div);
-  });
-}
-
-function renderNoteMarkers(num, half) {
-  const hitOverlay = document.getElementById('ln-hit-overlay');
-  notes.filter(n => n.page === num && (splitMode ? n.half === half : true)).forEach(note => {
-    const ch = characters.find(c => c.id === note.charId);
-    const color = ch?.color || note.charColor || '#c8a96e';
-    if (!note.bounds) return;
-    const wrap = document.createElement('div');
-    wrap.style.cssText = `position:absolute;left:${note.bounds.x}%;top:${note.bounds.y}%;width:${note.bounds.w}%;height:${note.bounds.h}%;z-index:5;pointer-events:all;cursor:pointer;`;
-    const underline = document.createElement('div');
-    underline.style.cssText = `position:absolute;bottom:0;left:0;right:0;height:2.5px;border-radius:1px;opacity:0.75;background:${color};`;
-    wrap.appendChild(underline);
-    const tag = document.createElement('div');
-    tag.className = 'note-tag';
-    tag.style.background = color;
-    tag.textContent = note.type;
-    wrap.appendChild(tag);
-    wrap.addEventListener('click', e => { e.stopPropagation(); openEditPopover(e, note); });
-    hitOverlay.appendChild(wrap);
-  });
-}
-
-function redrawOverlay(num) {
-  const hitOverlay = document.getElementById('ln-hit-overlay');
-  hitOverlay.innerHTML = '';
-  renderLineZones(pk());
-  renderNoteMarkers(num, currentHalf);
-}
-
-/* ── Notes-view keyboard zone navigation ── */
-function getNavigableZoneIndices() {
-  const zones = lineZones[pk()] || [];
-  const result = [];
-  zones.forEach((z, i) => { if (!z.isCharName && !z.isStageDirection) result.push(i); });
-  return result;
-}
-
-function notesSetHoveredZone(rawIdx) {
-  const hitOverlay = document.getElementById('ln-hit-overlay');
-  hitOverlay.querySelectorAll('.line-zone').forEach(el => el.classList.remove('ln-zone-focused'));
-  notesHoveredZoneIdx = rawIdx;
-  if (rawIdx === null) return;
-  const el = hitOverlay.querySelector(`.line-zone[data-zone="${rawIdx}"]`);
-  if (el) {
-    el.classList.add('ln-zone-focused');
-    el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-  }
-}
-
-function notesActivateFocusedZone() {
-  if (notesHoveredZoneIdx === null) return;
-  const zones = lineZones[pk()] || [];
-  const zone = zones[notesHoveredZoneIdx];
-  if (!zone) return;
-  const el = document.getElementById('ln-hit-overlay').querySelector(`.line-zone[data-zone="${notesHoveredZoneIdx}"]`);
-  if (!el) return;
-  const rect = el.getBoundingClientRect();
-  const cx = rect.left + rect.width / 2;
-  const cy = rect.top + rect.height / 2;
-  const syntheticE = { clientX: cx, clientY: cy, stopPropagation: () => {} };
-  const existing = notes.find(n => n.page === currentPage && (splitMode ? n.half === currentHalf : true) && n.zoneIdx === notesHoveredZoneIdx);
-  if (existing) openEditPopover(syntheticE, existing);
-  else openPopover(syntheticE, currentPage, currentHalf, notesHoveredZoneIdx, zone);
-}
-
-/* ═══════════════════════════════════════════════════════════
-   NOTES VIEW — POPOVER
-   ═══════════════════════════════════════════════════════════ */
-function openPopover(e, pageNum, half, zoneIdx, zone) {
-  e.stopPropagation();
-  if (flatChars.length === 0) { toast('Add cast members first — go to Cast & Crew tab'); return; }
-  pendingNote = { page: pageNum, half: splitMode ? half : '', zoneIdx, bounds: { x: zone.x, y: zone.y, w: zone.w, h: Math.max(zone.h, 1.5) }, lineText: zone.text || '' };
-  buildPopover(null, null, zone.text);
-  positionPopover(e.clientX, e.clientY);
-  showPopover();
-}
-
-function openEditPopover(e, note) {
-  e.stopPropagation();
-  pendingNote = { editId: note.id, page: note.page, half: note.half || '', bounds: note.bounds, lineText: note.lineText || '' };
-  const fc = flatChars.find(
-    c => c.castId === note.castId && c.name === (note.characterName || note.charName)
-  );
-  buildPopover(fc?.id || note.charId || null, note.type, note.lineText);
-  positionPopover(e.clientX, e.clientY);
-  showPopover();
-}
-
-function buildPopover(selCharId, selType, lineText) {
-  const charsDiv = document.getElementById('pop-chars');
-  const typesDiv = document.getElementById('pop-types');
-  const lineEl = document.getElementById('pop-line-text');
-  const castLabel = document.getElementById('pop-cast-label');
-  charsDiv.innerHTML = ''; typesDiv.innerHTML = '';
-
-  // Line text — show/hide via inline style since CSS default is display:none
-  if (lineText && lineText.trim().length > 1) {
-    lineEl.textContent = '\u201c' + lineText.trim() + '\u201d';
-    lineEl.style.display = '';
-  } else {
-    lineEl.style.display = 'none';
-  }
-
-  // Cast label shows character count hint
-  if (castLabel) castLabel.textContent = flatChars.length === 1 ? flatChars[0].name : 'Cast';
-
-  const defChar = selCharId || (flatChars[activeCharIdx]?.id) || flatChars[0]?.id;
-  flatChars.forEach((c, i) => {
-    const div = document.createElement('div');
-    div.className = 'popover-char' + (c.id === defChar ? ' popover-char--active' : '');
-    div.dataset.id = c.id;
-    div.innerHTML = `<div class="pop-char-dot" style="background:${c.color};width:9px;height:9px;border-radius:50%;flex-shrink:0;"></div>
-      <div style="flex:1">
-        <div class="char-label">${escapeHtml(c.name)}</div>
-        ${c.actorName !== c.name ? `<div style="font-size:10px;color:#5c5850;font-family:'DM Mono',monospace">${escapeHtml(c.actorName)}</div>` : ''}
-      </div>
-      <span class="shortcut-key">${i + 1}</span>`;
-    div.addEventListener('click', () => {
-      charsDiv.querySelectorAll('.popover-char').forEach(el => el.classList.remove('popover-char--active'));
-      div.classList.add('popover-char--active');
-      activeCharIdx = i;
-    });
-    charsDiv.appendChild(div);
-  });
-  if (defChar) { const ci = flatChars.findIndex(c => c.id === defChar); if (ci >= 0) activeCharIdx = ci; }
-
-  const defType = selType || activeNoteType;
-  const TYPE_KEYS = { skp: 'S', para: 'P', line: 'L', add: 'A', gen: 'G' };
-  Object.entries(NOTE_TYPES_MAP).forEach(([key, label]) => {
-    const btn = document.createElement('button');
-    btn.className = 'popover-type' + (key === defType ? ' popover-type--active' : '');
-    btn.dataset.type = key;
-    btn.title = label;
-    btn.innerHTML = `<span>${key}</span><span class="type-key">${TYPE_KEYS[key] || key[0].toUpperCase()}</span>`;
-    btn.addEventListener('click', () => {
-      typesDiv.querySelectorAll('.popover-type').forEach(el => el.classList.remove('popover-type--active'));
-      btn.classList.add('popover-type--active');
-      activeNoteType = key;
-    });
-    typesDiv.appendChild(btn);
-  });
-  if (defType) activeNoteType = defType;
-
-  document.getElementById('pop-confirm-btn').textContent = pendingNote?.editId ? 'Update \u21b5' : 'Add Note \u21b5';
-}
-
-function positionPopover(mx, my) {
-  popoverEl.style.visibility = 'hidden';
-  popoverEl.style.display = 'flex';
-  popoverEl.style.flexDirection = 'column';
-  const pw = popoverEl.offsetWidth || 260, ph = popoverEl.offsetHeight || 200;
-  popoverEl.style.display = 'none';
-  popoverEl.style.visibility = '';
-  let left = mx + 14, top = my - 24;
-  if (left + pw > window.innerWidth - 16) left = mx - pw - 14;
-  if (top + ph > window.innerHeight - 16) top = window.innerHeight - ph - 16;
-  popoverEl.style.left = left + 'px'; popoverEl.style.top = Math.max(8, top) + 'px';
-}
-
-function showPopover() {
-  popoverEl.style.display = 'flex';
-  popoverEl.style.flexDirection = 'column';
-  popoverOpen = true;
-  _popCloseGuard = true;
-  requestAnimationFrame(() => { _popCloseGuard = false; });
-}
-function closePopover() { popoverEl.style.display = 'none'; pendingNote = null; popoverOpen = false; }
-
-async function confirmNote() {
-  if (!pendingNote || activeCharIdx < 0 || !flatChars[activeCharIdx]) return;
-  const fc = flatChars[activeCharIdx];
-  const pid = state.activeProduction.id;
-  const noteData = {
-    uid: state.currentUser.uid,
-    castId: fc.castId,
-    characterName: fc.name,   // frozen at save time
-    charColor: fc.color,      // frozen at save time
-    type: activeNoteType, page: pendingNote.page, half: pendingNote.half || '',
-    zoneIdx: pendingNote.zoneIdx, bounds: pendingNote.bounds, lineText: pendingNote.lineText || '',
-    productionId: pid,
-  };
-
-  try {
-    if (pendingNote.editId) {
-      await updateDoc(doc(db, 'productions', pid, 'lineNotes', pendingNote.editId), { ...noteData, updatedAt: serverTimestamp() });
-    } else {
-      await addDoc(collection(db, 'productions', pid, 'lineNotes'), { ...noteData, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
-    }
-    toast('Note ' + (pendingNote.editId ? 'updated' : 'added'));
-  } catch(e) { toast('Failed to save note', 'error'); }
-  closePopover();
-}
-
-/* ═══════════════════════════════════════════════════════════
-   NOTES VIEW — RUBBER BAND DRAW
-   ═══════════════════════════════════════════════════════════ */
-function notesDrawDown(e) {
-  if (e.button !== 0 || flatChars.length === 0) return;
-  const wrapper = document.getElementById('ln-page-wrapper');
-  const wRect = wrapper.getBoundingClientRect();
-  const clickX = e.clientX - wRect.left, clickY = e.clientY - wRect.top;
-  const pw = wrapper.offsetWidth, ph = wrapper.offsetHeight;
-  const xPct = (clickX / pw) * 100, yPct = (clickY / ph) * 100;
-  const zKey = pk();
-  const zones = lineZones[zKey] || [];
-  if (zones.some(z => !z.isCharName && xPct >= z.x && xPct <= z.x + z.w && yPct >= z.y && yPct <= z.y + Math.max(z.h, 1.5))) return;
-  if (notes.some(n => { const b = n.bounds; return b && n.page === currentPage && xPct >= b.x && xPct <= b.x + b.w && yPct >= b.y && yPct <= b.y + b.h; })) return;
-  drawStart = { x: clickX, y: clickY };
-  drawing = true;
-  const rb = document.getElementById('ln-rubber-band');
-  rb.style.display = 'block'; rb.style.left = drawStart.x + 'px'; rb.style.top = drawStart.y + 'px'; rb.style.width = '0'; rb.style.height = '0';
-}
-
-/* ═══════════════════════════════════════════════════════════
-   GLOBAL MOUSE MOVE/UP
-   ═══════════════════════════════════════════════════════════ */
-function globalMouseMove(e) {
-  // Notes rubber band
-  if (drawing && drawStart) {
-    const wrapper = document.getElementById('ln-page-wrapper');
-    const rect = wrapper.getBoundingClientRect();
-    const cx = e.clientX - rect.left, cy = e.clientY - rect.top;
-    const x = Math.min(cx, drawStart.x), y = Math.min(cy, drawStart.y);
-    const w = Math.abs(cx - drawStart.x), h = Math.abs(cy - drawStart.y);
-    const rb = document.getElementById('ln-rubber-band');
-    rb.style.left = x + 'px'; rb.style.top = y + 'px'; rb.style.width = w + 'px'; rb.style.height = h + 'px';
-  }
-  // Zone editor drag
-  if (zeDragState) zeHandleMouseMove(e);
-  // Zone editor rubber band
-  if (zeDrawing && zeDrawStart) {
-    const wrapper = document.getElementById('ze-page-wrapper');
-    const rect = wrapper.getBoundingClientRect();
-    const cx = e.clientX - rect.left, cy = e.clientY - rect.top;
-    const x = Math.min(cx, zeDrawStart.x), y = Math.min(cy, zeDrawStart.y);
-    const w = Math.abs(cx - zeDrawStart.x), h = Math.abs(cy - zeDrawStart.y);
-    const rb = document.getElementById('ze-rubber-band');
-    rb.style.left = x + 'px'; rb.style.top = y + 'px'; rb.style.width = w + 'px'; rb.style.height = h + 'px';
-  }
-}
-
-function globalMouseUp(e) {
-  // Zone editor drag end
-  if (zeDragState) { zeDragState = null; zeUpdateListPanel(); debounceSaveZones(); return; }
-  // Zone editor rubber band end
-  if (zeDrawing && zeDrawStart) { zeFinishDraw(e); return; }
-  // Notes rubber band end
-  if (!drawing || !drawStart) return;
-  drawing = false;
-  document.getElementById('ln-rubber-band').style.display = 'none';
-  const wrapper = document.getElementById('ln-page-wrapper');
-  const rect = wrapper.getBoundingClientRect();
-  const cx = e.clientX - rect.left, cy = e.clientY - rect.top;
-  const x = Math.min(cx, drawStart.x), y = Math.min(cy, drawStart.y);
-  const w = Math.abs(cx - drawStart.x), h = Math.abs(cy - drawStart.y);
-  if (w < 10 || h < 5) { drawStart = null; return; }
-  const pw = wrapper.offsetWidth, ph = wrapper.offsetHeight;
-  const bounds = { x: (x / pw) * 100, y: (y / ph) * 100, w: (w / pw) * 100, h: (h / ph) * 100 };
-  pendingNote = { page: currentPage, half: splitMode ? currentHalf : '', bounds, lineText: '' };
-  buildPopover(null, null, '');
-  positionPopover(e.clientX, e.clientY);
-  showPopover();
-  drawStart = null;
-}
-
-/* ═══════════════════════════════════════════════════════════
    ZONE EDITOR VIEW
    ═══════════════════════════════════════════════════════════ */
-let zeRenderGen = 0;
-
 async function renderZoneEditorPage(num) {
   const gen = ++zeRenderGen;
   zeSelectedIdx = null;
   zeMultiSelected.clear();
-  document.getElementById('ze-detail').classList.remove('visible');
-  document.getElementById('ze-multi-bar').classList.remove('visible');
+  document.getElementById('ze-detail')?.classList.remove('visible');
+  document.getElementById('ze-multi-bar')?.classList.remove('visible');
 
+  if (!pdfDoc) return;
   const page = await pdfDoc.getPage(num);
   if (gen !== zeRenderGen) return;
 
   const viewport = page.getViewport({ scale: pdfScale });
   const canvas = document.getElementById('ze-canvas');
+  if (!canvas) return;
   const ctx = canvas.getContext('2d');
 
   if (splitMode) {
@@ -882,7 +557,11 @@ async function renderZoneEditorPage(num) {
   }
   if (gen !== zeRenderGen) return;
 
-  document.getElementById('ln-page-input').value = num;
+  const pageInput = document.getElementById('ln-page-input');
+  if (pageInput) pageInput.value = pdfPageToScriptLabel(num, currentHalf);
+  // Also update page label tooltip
+  const pageHint = document.getElementById('ln-page-hint');
+  if (pageHint) pageHint.textContent = `PDF p.${num}`;
   const zKey = pk();
   if (!lineZones[zKey]) await loadOrExtractZones(page, num, viewport, zKey);
   if (gen !== zeRenderGen) return;
@@ -898,6 +577,7 @@ function zeCurrentZones() {
 
 function zeRenderZones() {
   const ovl = document.getElementById('ze-edit-overlay');
+  if (!ovl) return;
   const rb = document.getElementById('ze-rubber-band');
   while (ovl.firstChild && ovl.firstChild !== rb) ovl.removeChild(ovl.firstChild);
   if (!ovl.contains(rb)) ovl.appendChild(rb);
@@ -924,6 +604,14 @@ function zeRenderZones() {
       if (e.target === handle) return;
       e.stopPropagation();
       if (e.shiftKey || e.metaKey || e.ctrlKey) { zeToggleMultiSelect(idx); return; }
+      // If this zone is part of a multi-selection, drag all of them together
+      if (zeMultiSelected.size > 0 && zeMultiSelected.has(idx)) {
+        const wrapper = document.getElementById('ze-page-wrapper');
+        const origAllBounds = {};
+        zeMultiSelected.forEach(i => { if (zones[i]) origAllBounds[i] = { ...zones[i] }; });
+        zeDragState = { type: 'move-all', idx, startX: e.clientX, startY: e.clientY, origBounds: { ...zones[idx] }, pw: wrapper.offsetWidth, ph: wrapper.offsetHeight, origAllBounds };
+        return;
+      }
       if (zeMultiSelected.size > 0) zeClearMultiSelect();
       zeSelectZone(idx);
       const wrapper = document.getElementById('ze-page-wrapper');
@@ -943,10 +631,26 @@ function zeRenderZones() {
 
 function zeHandleMouseMove(e) {
   if (!zeDragState) return;
-  const { type, idx, startX, startY, origBounds, pw, ph } = zeDragState;
+  const { type, idx, startX, startY, origBounds, pw, ph, origAllBounds } = zeDragState;
   const dx = ((e.clientX - startX) / pw) * 100;
   const dy = ((e.clientY - startY) / ph) * 100;
   const zones = zeCurrentZones();
+  if (type === 'move-all' && origAllBounds) {
+    // Move every zone in the multi-selection by the same delta, clamped individually
+    zeMultiSelected.forEach(i => {
+      const orig = origAllBounds[i];
+      if (!orig || !zones[i]) return;
+      zones[i].x = Math.max(0, Math.min(99, orig.x + dx));
+      zones[i].y = Math.max(0, Math.min(99, orig.y + dy));
+    });
+    // Update all the overlay divs directly for smooth perf
+    const ovl = document.getElementById('ze-edit-overlay');
+    zeMultiSelected.forEach(i => {
+      const div = ovl?.querySelector(`[data-idx="${i}"]`);
+      if (div && zones[i]) { div.style.left = zones[i].x + '%'; div.style.top = zones[i].y + '%'; }
+    });
+    return;
+  }
   if (type === 'move') {
     zones[idx].x = Math.max(0, Math.min(99, origBounds.x + dx));
     zones[idx].y = Math.max(0, Math.min(99, origBounds.y + dy));
@@ -954,7 +658,7 @@ function zeHandleMouseMove(e) {
     zones[idx].w = Math.min(100 - zones[idx].x, Math.max(2, origBounds.w + dx));
     zones[idx].h = Math.max(0.5, origBounds.h + dy);
   }
-  const div = document.getElementById('ze-edit-overlay').querySelector(`[data-idx="${idx}"]`);
+  const div = document.getElementById('ze-edit-overlay')?.querySelector(`[data-idx="${idx}"]`);
   if (div) { div.style.left = zones[idx].x + '%'; div.style.top = zones[idx].y + '%'; div.style.width = zones[idx].w + '%'; div.style.height = Math.max(zones[idx].h, 1.2) + '%'; }
   if (idx === zeSelectedIdx) zePopulateDetail(idx);
 }
@@ -967,12 +671,13 @@ function zeOverlayMouseDown(e) {
   zeDrawStart = { x: e.clientX - rect.left, y: e.clientY - rect.top };
   zeDrawing = true;
   const rb = document.getElementById('ze-rubber-band');
-  rb.style.display = 'block'; rb.style.left = zeDrawStart.x + 'px'; rb.style.top = zeDrawStart.y + 'px'; rb.style.width = '0'; rb.style.height = '0';
+  if (rb) { rb.style.display = 'block'; rb.style.left = zeDrawStart.x + 'px'; rb.style.top = zeDrawStart.y + 'px'; rb.style.width = '0'; rb.style.height = '0'; }
 }
 
 function zeFinishDraw(e) {
   zeDrawing = false;
-  document.getElementById('ze-rubber-band').style.display = 'none';
+  const rb = document.getElementById('ze-rubber-band');
+  if (rb) rb.style.display = 'none';
   const wrapper = document.getElementById('ze-page-wrapper');
   const rect = wrapper.getBoundingClientRect();
   const cx = e.clientX - rect.left, cy = e.clientY - rect.top;
@@ -989,25 +694,42 @@ function zeFinishDraw(e) {
   toast('Zone drawn — type text in the panel →');
 }
 
-/* ── Zone editor selection ── */
+function globalMouseMove(e) {
+  if (zeDragState) zeHandleMouseMove(e);
+  if (zeDrawing && zeDrawStart) {
+    const wrapper = document.getElementById('ze-page-wrapper');
+    if (!wrapper) return;
+    const rect = wrapper.getBoundingClientRect();
+    const cx = e.clientX - rect.left, cy = e.clientY - rect.top;
+    const x = Math.min(cx, zeDrawStart.x), y = Math.min(cy, zeDrawStart.y);
+    const w = Math.abs(cx - zeDrawStart.x), h = Math.abs(cy - zeDrawStart.y);
+    const rb = document.getElementById('ze-rubber-band');
+    if (rb) { rb.style.left = x + 'px'; rb.style.top = y + 'px'; rb.style.width = w + 'px'; rb.style.height = h + 'px'; }
+  }
+}
+
+function globalMouseUp(e) {
+  if (zeDragState) { zeDragState = null; zeUpdateListPanel(); debounceSaveZones(); return; }
+  if (zeDrawing && zeDrawStart) { zeFinishDraw(e); return; }
+}
+
 function zeSelectZone(idx, focusText = false) {
   zeSelectedIdx = idx;
-  document.getElementById('ze-edit-overlay').querySelectorAll('.ze-zone').forEach(el => el.classList.toggle('selected', parseInt(el.dataset.idx) === idx));
-  document.getElementById('ze-items-list').querySelectorAll('.ze-list-item').forEach(el => el.classList.toggle('selected', parseInt(el.dataset.idx) === idx));
+  document.getElementById('ze-edit-overlay')?.querySelectorAll('.ze-zone').forEach(el => el.classList.toggle('selected', parseInt(el.dataset.idx) === idx));
+  document.getElementById('ze-items-list')?.querySelectorAll('.ze-list-item').forEach(el => el.classList.toggle('selected', parseInt(el.dataset.idx) === idx));
   if (idx !== null && idx !== undefined) {
     zePopulateDetail(idx, focusText);
-    document.getElementById('ze-detail').classList.add('visible');
-    // Scroll the list item into view
+    document.getElementById('ze-detail')?.classList.add('visible');
     const li = document.getElementById('ze-items-list')?.querySelector(`[data-idx="${idx}"]`);
     if (li) li.scrollIntoView({ block: 'nearest' });
   } else {
-    document.getElementById('ze-detail').classList.remove('visible');
+    document.getElementById('ze-detail')?.classList.remove('visible');
   }
 }
 
 function zeToggleMultiSelect(idx) {
   zeSelectedIdx = null;
-  document.getElementById('ze-detail').classList.remove('visible');
+  document.getElementById('ze-detail')?.classList.remove('visible');
   if (zeMultiSelected.has(idx)) zeMultiSelected.delete(idx); else zeMultiSelected.add(idx);
   zeRefreshMultiBar(); zeRenderZones(); zeUpdateListPanel();
 }
@@ -1017,35 +739,34 @@ function zeClearMultiSelect() { zeMultiSelected.clear(); zeRefreshMultiBar(); ze
 function zeRefreshMultiBar() {
   const bar = document.getElementById('ze-multi-bar');
   const count = document.getElementById('ze-multi-count');
-  if (zeMultiSelected.size > 0) { bar.classList.add('visible'); count.textContent = `${zeMultiSelected.size} zone${zeMultiSelected.size > 1 ? 's' : ''} selected`; }
+  if (!bar) return;
+  if (zeMultiSelected.size > 0) { bar.classList.add('visible'); if (count) count.textContent = `${zeMultiSelected.size} zone${zeMultiSelected.size > 1 ? 's' : ''} selected`; }
   else bar.classList.remove('visible');
 }
 
 function zePopulateDetail(idx, focusText = false) {
   const z = zeCurrentZones()[idx]; if (!z) return;
-  document.getElementById('zd-x').value = z.x.toFixed(1);
-  document.getElementById('zd-y').value = z.y.toFixed(1);
-  document.getElementById('zd-w').value = z.w.toFixed(1);
-  document.getElementById('zd-h').value = z.h.toFixed(1);
-  document.getElementById('zd-text').value = z.text || '';
-  document.getElementById('zd-charname').checked = !!z.isCharName;
-  document.getElementById('zd-stagedir').checked = !!z.isStageDirection;
-  if (focusText) {
-    const ta = document.getElementById('zd-text');
-    requestAnimationFrame(() => { ta.focus(); ta.select(); });
-  }
+  const getValue = id => document.getElementById(id);
+  const x = getValue('zd-x'); if (x) x.value = z.x.toFixed(1);
+  const y = getValue('zd-y'); if (y) y.value = z.y.toFixed(1);
+  const w = getValue('zd-w'); if (w) w.value = z.w.toFixed(1);
+  const h = getValue('zd-h'); if (h) h.value = z.h.toFixed(1);
+  const t = getValue('zd-text'); if (t) t.value = z.text || '';
+  const cn = getValue('zd-charname'); if (cn) cn.checked = !!z.isCharName;
+  const sd = getValue('zd-stagedir'); if (sd) sd.checked = !!z.isStageDirection;
+  if (focusText && t) requestAnimationFrame(() => { t.focus(); t.select(); });
 }
 
 function zeApplyDetail() {
   if (zeSelectedIdx === null) return;
   const zones = zeCurrentZones(); const z = zones[zeSelectedIdx]; if (!z) return;
-  z.x = parseFloat(document.getElementById('zd-x').value) || z.x;
-  z.y = parseFloat(document.getElementById('zd-y').value) || z.y;
-  z.w = parseFloat(document.getElementById('zd-w').value) || z.w;
-  z.h = parseFloat(document.getElementById('zd-h').value) || z.h;
-  z.text = document.getElementById('zd-text').value;
-  z.isCharName = document.getElementById('zd-charname').checked;
-  z.isStageDirection = document.getElementById('zd-stagedir').checked;
+  z.x = parseFloat(document.getElementById('zd-x')?.value) || z.x;
+  z.y = parseFloat(document.getElementById('zd-y')?.value) || z.y;
+  z.w = parseFloat(document.getElementById('zd-w')?.value) || z.w;
+  z.h = parseFloat(document.getElementById('zd-h')?.value) || z.h;
+  z.text = document.getElementById('zd-text')?.value || '';
+  z.isCharName = document.getElementById('zd-charname')?.checked || false;
+  z.isStageDirection = document.getElementById('zd-stagedir')?.checked || false;
   if (z.isCharName) z.isStageDirection = false;
   if (z.isStageDirection) z.isCharName = false;
   zeRenderZones(); zeUpdateListPanel(); zeSelectZone(zeSelectedIdx); debounceSaveZones();
@@ -1056,7 +777,7 @@ function zeDeleteSelected() {
   if (zeSelectedIdx === null) return;
   zeCurrentZones().splice(zeSelectedIdx, 1);
   zeSelectedIdx = null;
-  document.getElementById('ze-detail').classList.remove('visible');
+  document.getElementById('ze-detail')?.classList.remove('visible');
   zeRenderZones(); zeUpdateListPanel(); debounceSaveZones(); toast('Zone deleted');
 }
 
@@ -1066,7 +787,7 @@ function zeMultiDelete() {
   [...zeMultiSelected].sort((a, b) => b - a).forEach(i => zones.splice(i, 1));
   const cnt = zeMultiSelected.size;
   zeMultiSelected.clear(); zeSelectedIdx = null;
-  document.getElementById('ze-detail').classList.remove('visible');
+  document.getElementById('ze-detail')?.classList.remove('visible');
   zeRefreshMultiBar(); zeRenderZones(); zeUpdateListPanel(); debounceSaveZones();
   toast(`Deleted ${cnt} zone${cnt > 1 ? 's' : ''}`);
 }
@@ -1085,12 +806,54 @@ function zeMultiToggleStagDir() {
   zeRenderZones(); zeUpdateListPanel(); debounceSaveZones();
 }
 
+function zeSelectAllForDrag() {
+  const zones = zeCurrentZones();
+  if (zones.length === 0) return;
+  const isAllSelected = zeMultiSelected.size === zones.length;
+  if (isAllSelected) {
+    zeClearMultiSelect();
+    toast('Deselected all zones');
+  } else {
+    zeSelectedIdx = null;
+    document.getElementById('ze-detail')?.classList.remove('visible');
+    zeMultiSelected.clear();
+    zones.forEach((_, i) => zeMultiSelected.add(i));
+    zeRefreshMultiBar();
+    zeRenderZones();
+    zeUpdateListPanel();
+    toast(`All ${zones.length} zones selected — drag any zone to move them all`);
+  }
+}
+
+
 function zeUpdateListPanel() {
   const zones = zeCurrentZones();
   const annotatable = zones.filter(z => !z.isCharName).length;
-  document.getElementById('ze-list-meta').textContent = `${zones.length} zones (${annotatable} annotatable) \u00b7 p.${pageLabel(currentPage, currentHalf)}`;
+  const meta = document.getElementById('ze-list-meta');
+  if (meta) meta.textContent = `${zones.length} zones (${annotatable} annotatable) \u00b7 p.${pageLabel(currentPage, currentHalf)}`;
+
+  // Render or update the "Select All & Drag" button below the list
+  let selectAllBtn = document.getElementById('ze-btn-select-all-drag');
+  if (!selectAllBtn) {
+    const listContainer = document.getElementById('ze-items-list')?.parentElement;
+    if (listContainer) {
+      selectAllBtn = document.createElement('button');
+      selectAllBtn.id = 'ze-btn-select-all-drag';
+      selectAllBtn.className = 'ze-select-all-drag-btn';
+      selectAllBtn.title = 'Select all zones and drag them together to fix a uniform offset';
+      listContainer.appendChild(selectAllBtn);
+      selectAllBtn.addEventListener('click', zeSelectAllForDrag);
+    }
+  }
+  if (selectAllBtn) {
+    const isAllSelected = zones.length > 0 && zeMultiSelected.size === zones.length;
+    selectAllBtn.textContent = isAllSelected ? '✕ Deselect All' : '⊕ Select All & Drag';
+    selectAllBtn.classList.toggle('active', isAllSelected);
+    selectAllBtn.disabled = zones.length === 0;
+  }
 
   const list = document.getElementById('ze-items-list');
+  if (!list) return;
   if (zones.length === 0) {
     list.innerHTML = `<div style="padding:20px 12px;text-align:center;font-family:'DM Mono',monospace;font-size:11px;color:var(--text3);line-height:1.8">No zones on this page.<br>Draw zones or click Re-extract.</div>`;
     return;
@@ -1116,16 +879,14 @@ function zeUpdateListPanel() {
       e.stopPropagation();
       const idx = parseInt(btn.dataset.idx);
       zeCurrentZones().splice(idx, 1);
-      if (zeSelectedIdx === idx) { zeSelectedIdx = null; document.getElementById('ze-detail').classList.remove('visible'); }
+      if (zeSelectedIdx === idx) { zeSelectedIdx = null; document.getElementById('ze-detail')?.classList.remove('visible'); }
       else if (zeSelectedIdx > idx) zeSelectedIdx--;
       zeRenderZones(); zeUpdateListPanel(); debounceSaveZones();
     });
   });
 }
 
-// Wire up zone editor toolbar (called once from initLineNotes would require static HTML; we wire on view switch)
 function wireZeToolbar() {
-  document.getElementById('ze-btn-reextract')?.removeEventListener('click', zeReExtract);
   document.getElementById('ze-btn-reextract')?.addEventListener('click', zeReExtract);
   document.getElementById('ze-btn-clear')?.addEventListener('click', zeClearAll);
   document.getElementById('ze-btn-save')?.addEventListener('click', () => firebaseSaveZones(pk()));
@@ -1136,7 +897,6 @@ function wireZeToolbar() {
   document.getElementById('ze-btn-apply')?.addEventListener('click', zeApplyDetail);
   document.getElementById('ze-btn-del-zone')?.addEventListener('click', zeDeleteSelected);
 
-  // Live-update text as user types — no Apply needed for text
   const textArea = document.getElementById('zd-text');
   if (textArea) {
     textArea.addEventListener('input', () => {
@@ -1144,26 +904,91 @@ function wireZeToolbar() {
       const z = zeCurrentZones()[zeSelectedIdx];
       if (!z) return;
       z.text = textArea.value;
-      // Update the label on the canvas zone in real time
       const ovl = document.getElementById('ze-edit-overlay');
       const el = ovl?.querySelector(`[data-idx="${zeSelectedIdx}"] .ze-zone-label`);
       if (el) el.textContent = textArea.value ? textArea.value.substring(0, 50) : `[zone ${zeSelectedIdx}]`;
-      // Update the list item text in real time
       const li = document.getElementById('ze-items-list')?.querySelector(`[data-idx="${zeSelectedIdx}"] .ze-item-text, [data-idx="${zeSelectedIdx}"] .ze-item-no-text`);
-      if (li) {
-        li.className = textArea.value ? 'ze-item-text' : 'ze-item-no-text';
-        li.textContent = textArea.value ? textArea.value.substring(0, 60) + (textArea.value.length > 60 ? '…' : '') : '[no text]';
-      }
+      if (li) { li.className = textArea.value ? 'ze-item-text' : 'ze-item-no-text'; li.textContent = textArea.value ? textArea.value.substring(0, 60) + (textArea.value.length > 60 ? '\u2026' : '') : '[no text]'; }
       debounceSaveZones();
     });
-    textArea.addEventListener('keydown', e => {
-      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); zeApplyDetail(); }
-    });
+    textArea.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); zeApplyDetail(); } });
   }
 
-  // Checkboxes apply immediately
   document.getElementById('zd-charname')?.addEventListener('change', zeApplyDetail);
   document.getElementById('zd-stagedir')?.addEventListener('change', zeApplyDetail);
+
+  // Page navigation (zone editor uses the same ln-page-nav)
+  document.getElementById('ln-prev-page')?.addEventListener('click', () => changeZonePage(-1));
+  document.getElementById('ln-next-page')?.addEventListener('click', () => changeZonePage(1));
+  document.getElementById('ln-split-btn')?.addEventListener('click', toggleSplitMode);
+
+  // "Set as Page 1" — marks the currently-viewed page/half as script page 1.
+  // Saved to Firestore so all production members share the same offset automatically.
+  document.getElementById('ln-set-page1-btn')?.addEventListener('click', async () => {
+    if (!pdfDoc) return;
+    scriptPageStartPage = currentPage;
+    scriptPageStartHalf = splitMode ? currentHalf : '';
+    if (state.activeProduction) {
+      state.activeProduction.scriptPageStartPage = scriptPageStartPage;
+      state.activeProduction.scriptPageStartHalf = scriptPageStartHalf;
+      try {
+        await updateDoc(doc(db, 'productions', state.activeProduction.id), {
+          scriptPageStartPage,
+          scriptPageStartHalf,
+        });
+      } catch(e) { console.warn('Could not save scriptPageStart', e); }
+    }
+    // Refresh page display
+    const pageInput = document.getElementById('ln-page-input');
+    if (pageInput) pageInput.value = pdfPageToScriptLabel(currentPage, currentHalf);
+    updatePageStartBadge();
+    const halfStr = splitMode ? currentHalf : '';
+    toast(`Page offset set — PDF p.${scriptPageStartPage}${halfStr} is now script page 1`);
+  });
+
+  const pageInput = document.getElementById('ln-page-input');
+  if (pageInput) {
+    pageInput.addEventListener('change', () => {
+      if (!pdfDoc) return;
+      const pos = scriptLabelToPosition(pageInput.value.trim());
+      if (!pos) { pageInput.value = pdfPageToScriptLabel(currentPage, currentHalf); return; }
+      const clamped = Math.max(1, Math.min(totalPages, pos.pdfPage));
+      const newHalf = splitMode ? (pos.half || 'L') : 'L';
+      pageInput.value = pdfPageToScriptLabel(clamped, newHalf);
+      if (clamped !== currentPage || newHalf !== currentHalf) {
+        currentPage = clamped; currentHalf = newHalf; renderZoneEditorPage(currentPage);
+      }
+    });
+    pageInput.addEventListener('keydown', e => { if (e.key === 'Enter') pageInput.blur(); });
+  }
+}
+
+async function changeZonePage(delta) {
+  if (!pdfDoc) return;
+  if (splitMode) {
+    if (delta > 0) {
+      if (currentHalf === 'L') { currentHalf = 'R'; } else { if (currentPage >= totalPages) return; currentPage++; currentHalf = 'L'; }
+    } else {
+      if (currentHalf === 'R') { currentHalf = 'L'; } else { if (currentPage <= 1) return; currentPage--; currentHalf = 'R'; }
+    }
+  } else {
+    const next = currentPage + delta;
+    if (next < 1 || next > totalPages) return;
+    currentPage = next;
+  }
+  const pageInput = document.getElementById('ln-page-input');
+  if (pageInput) pageInput.value = pdfPageToScriptLabel(currentPage, currentHalf);
+  await renderZoneEditorPage(currentPage);
+}
+
+function toggleSplitMode() {
+  splitMode = !splitMode;
+  currentHalf = 'L';
+  lineZones = {};
+  const splitBtn = document.getElementById('ln-split-btn');
+  if (splitBtn) splitBtn.classList.toggle('ln-header-btn--active', splitMode);
+  toast(splitMode ? '2-up split ON' : '2-up split OFF');
+  if (pdfDoc) renderZoneEditorPage(currentPage);
 }
 
 async function zeReExtract() {
@@ -1181,7 +1006,7 @@ function zeClearAll() {
   if (!confirmDialog('Delete all zones on this page?')) return;
   lineZones[pk()] = [];
   zeSelectedIdx = null;
-  document.getElementById('ze-detail').classList.remove('visible');
+  document.getElementById('ze-detail')?.classList.remove('visible');
   zeRenderZones(); zeUpdateListPanel(); debounceSaveZones();
   toast('All zones cleared');
 }
@@ -1206,227 +1031,41 @@ async function firebaseSaveZones(zKey) {
 }
 
 /* ═══════════════════════════════════════════════════════════
-   NOTES SUBSCRIPTION (FIREBASE)
+   KEYBOARD SHORTCUTS (zone editor only)
    ═══════════════════════════════════════════════════════════ */
-function subscribeToNotes() {
-  if (notesUnsub) notesUnsub();
-  const pid = state.activeProduction.id;
-  try {
-    notesUnsub = onSnapshot(
-      query(collection(db, 'productions', pid, 'lineNotes'), where('productionId', '==', pid)),
-      snap => { notes = snap.docs.map(d => ({ id: d.id, ...d.data() })); renderSidebar(); if (currentView === 'notes' && pdfDoc) redrawOverlay(currentPage); },
-      err => {
-        if (notesUnsub) { notesUnsub(); notesUnsub = null; }
-        notesUnsub = onSnapshot(collection(db, 'productions', pid, 'lineNotes'), snap => {
-          notes = snap.docs.map(d => ({ id: d.id, ...d.data() })); renderSidebar(); if (currentView === 'notes' && pdfDoc) redrawOverlay(currentPage);
-        });
-      }
-    );
-  } catch(e) {
-    notesUnsub = onSnapshot(collection(db, 'productions', pid, 'lineNotes'), snap => {
-      notes = snap.docs.map(d => ({ id: d.id, ...d.data() })); renderSidebar(); if (currentView === 'notes' && pdfDoc) redrawOverlay(currentPage);
-    });
-  }
-  state.unsubscribers.push(() => { if (notesUnsub) { notesUnsub(); notesUnsub = null; } });
-}
-
-/* ═══════════════════════════════════════════════════════════
-   SIDEBAR
-   ═══════════════════════════════════════════════════════════ */
-function renderSidebar() {
-  buildFlatChars(); // refresh in case cast changed
-  const castList = document.getElementById('ln-cast-list');
-
-  if (flatChars.length === 0) {
-    castList.innerHTML = `
-      <div style="color:var(--ln-muted);font-size:12px;padding:8px 4px;line-height:1.5;">
-        No cast yet.<br>
-        <span style="color:var(--ln-gold);cursor:pointer;text-decoration:underline"
-              id="ln-go-cast">Go to Cast &amp; Crew →</span>
-      </div>`;
-    document.getElementById('ln-go-cast')?.addEventListener('click', () => {
-      import('../shared/tabs.js').then(m => m.switchTab('cast'));
-    });
-  } else {
-    castList.innerHTML = flatChars.map((c, i) => {
-      const cnt = notes.filter(
-        n => n.castId === c.castId && (n.characterName || n.charName) === c.name
-      ).length;
-      return `<div class="char-item ${i === activeCharIdx ? 'char-item--active' : ''}" data-idx="${i}">
-        <div class="char-dot" style="background:${escapeHtml(c.color)}"></div>
-        <div style="flex:1;min-width:0">
-          <div>${escapeHtml(c.name)}</div>
-          ${c.actorName !== c.name ? `<div class="char-actor" style="font-size:10px;color:var(--ln-muted);font-family:'DM Mono',monospace;">${escapeHtml(c.actorName)}</div>` : ''}
-        </div>
-        ${cnt ? `<span class="char-count">${cnt}</span>` : ''}
-      </div>`;
-    }).join('');
-
-    castList.querySelectorAll('.char-item').forEach(el => el.addEventListener('click', () => {
-      activeCharIdx = parseInt(el.dataset.idx); renderSidebar();
-    }));
-  }
-
-  const typesEl = document.getElementById('ln-note-types');
-  typesEl.innerHTML = NOTE_TYPES.map(t => `<button class="note-type-btn ${activeNoteType === t.key ? 'note-type-btn--active' : ''}" data-type="${t.key}">${t.key}</button>`).join('');
-  typesEl.querySelectorAll('.note-type-btn').forEach(btn => btn.addEventListener('click', () => { activeNoteType = btn.dataset.type; renderSidebar(); }));
-
-  const notesList = document.getElementById('ln-notes-list');
-  const sorted = [...notes].sort((a, b) => a.page !== b.page ? a.page - b.page : (a.bounds?.y || 0) - (b.bounds?.y || 0));
-  notesList.innerHTML = sorted.map(n => {
-    const fc = flatChars.find(
-      c => c.castId === n.castId && c.name === (n.characterName || n.charName)
-    );
-    const color = fc?.color || n.charColor || '#888';
-    const charLabel = n.characterName || n.charName || '?';
-    return `<div class="note-item" data-noteid="${escapeHtml(n.id)}"><div class="note-color-bar" style="background:${escapeHtml(color)}"></div><div class="note-item-content"><div class="note-item-header"><span class="note-page">p.${n.page}${n.half || ''}</span><span class="note-char-name">${escapeHtml(charLabel)}</span><span class="note-type-label">${escapeHtml(n.type)}</span></div>${n.lineText ? `<div class="note-text-preview">\u201c${escapeHtml(n.lineText.slice(0, 80))}\u201d</div>` : ''}</div><button class="note-delete-btn" data-noteid="${escapeHtml(n.id)}">\u00d7</button></div>`;
-  }).join('') || '<div style="color:#5c5850;font-size:12px;padding:12px;">No notes yet. Load a script and click any line.</div>';
-
-  notesList.querySelectorAll('.note-item').forEach(el => el.addEventListener('click', e => {
-    if (e.target.classList.contains('note-delete-btn')) return;
-    const note = notes.find(n => n.id === el.dataset.noteid);
-    if (note) { currentPage = note.page; if (splitMode && note.half) currentHalf = note.half; renderPage(currentPage); }
-  }));
-  notesList.querySelectorAll('.note-delete-btn').forEach(btn => btn.addEventListener('click', async e => {
-    e.stopPropagation(); const note = notes.find(n => n.id === btn.dataset.noteid); if (!note) return;
-    if (note.uid !== state.currentUser.uid && !isOwner()) { toast('Can only delete your own notes', 'error'); return; }
-    try { await deleteDoc(doc(db, 'productions', state.activeProduction.id, 'lineNotes', note.id)); toast('Note deleted'); } catch(e) { toast('Failed', 'error'); }
-  }));
-}
-
-/* ═══════════════════════════════════════════════════════════
-   KEYBOARD SHORTCUTS
-   ═══════════════════════════════════════════════════════════ */
-function handleKeydown(e) {
+document.addEventListener('keydown', e => {
   if (!document.getElementById('tab-linenotes')?.classList.contains('tab-panel--active')) return;
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
-  if (popoverOpen) {
-    if (e.key === 'Enter') { confirmNote(); return; }
-    if (e.key === 'Escape') { closePopover(); return; }
-    const num = parseInt(e.key);
-    if (num >= 1 && num <= flatChars.length) {
-      document.getElementById('pop-chars').querySelectorAll('.popover-char').forEach((el, i) => el.classList.toggle('popover-char--active', i === num - 1));
-      activeCharIdx = num - 1; return;
-    }
-    const typeKeys = { 's': 'skp', 'p': 'para', 'l': 'line', 'a': 'add', 'g': 'gen' };
-    if (typeKeys[e.key.toLowerCase()]) {
-      activeNoteType = typeKeys[e.key.toLowerCase()];
-      document.getElementById('pop-types').querySelectorAll('.popover-type').forEach(el => el.classList.toggle('popover-type--active', el.dataset.type === activeNoteType));
-      return;
-    }
-  }
+  if (e.key === 'ArrowRight' || e.key === ']') changeZonePage(1);
+  if (e.key === 'ArrowLeft' || e.key === '[') changeZonePage(-1);
+  if (e.key === 'Escape') { zeSelectZone(null); zeClearMultiSelect(); }
 
-  if (e.key === 'ArrowRight' || e.key === ']') changePage(1);
-  if (e.key === 'ArrowLeft' || e.key === '[') changePage(-1);
-  if (e.key === 'Escape') { closePopover(); zeSelectZone(null); zeClearMultiSelect(); notesSetHoveredZone(null); }
-
-  // Up/Down: navigate zones on current page
   if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
     e.preventDefault();
     const dir = e.key === 'ArrowDown' ? 1 : -1;
-
-    if (currentView === 'notes') {
-      const nav = getNavigableZoneIndices();
-      if (!nav.length) return;
-      const curPos = notesHoveredZoneIdx !== null ? nav.indexOf(notesHoveredZoneIdx) : -1;
-      let nextPos;
-      if (curPos === -1) nextPos = dir === 1 ? 0 : nav.length - 1;
-      else nextPos = Math.max(0, Math.min(nav.length - 1, curPos + dir));
-      notesSetHoveredZone(nav[nextPos]);
-    } else if (currentView === 'zones') {
-      const zones = zeCurrentZones();
-      if (!zones.length) return;
-      const cur = zeSelectedIdx !== null ? zeSelectedIdx : (dir === 1 ? -1 : zones.length);
-      const next = Math.max(0, Math.min(zones.length - 1, cur + dir));
-      zeSelectZone(next);
-    }
+    const zones = zeCurrentZones();
+    if (!zones.length) return;
+    const cur = zeSelectedIdx !== null ? zeSelectedIdx : (dir === 1 ? -1 : zones.length);
+    const next = Math.max(0, Math.min(zones.length - 1, cur + dir));
+    zeSelectZone(next);
     return;
   }
 
-  // Enter: activate the focused/selected zone
-  if (e.key === 'Enter') {
-    if (currentView === 'notes') { notesActivateFocusedZone(); return; }
-    if (currentView === 'zones' && zeSelectedIdx !== null) { zeSelectZone(zeSelectedIdx, true); return; }
+  if (e.key === 'Enter' && zeSelectedIdx !== null) { zeSelectZone(zeSelectedIdx, true); return; }
+
+  if ((e.key === 'Delete' || e.key === 'Backspace')) {
+    if (zeMultiSelected.size > 0) { zeMultiDelete(); return; }
+    if (zeSelectedIdx !== null) { zeDeleteSelected(); return; }
   }
-
-  if (currentView === 'zones') {
-    if ((e.key === 'Delete' || e.key === 'Backspace')) {
-      if (zeMultiSelected.size > 0) { zeMultiDelete(); return; }
-      if (zeSelectedIdx !== null) { zeDeleteSelected(); return; }
-    }
-    if (e.key.toLowerCase() === 'c' && !e.metaKey && !e.ctrlKey) {
-      if (zeMultiSelected.size > 0) { zeMultiToggleCharName(); return; }
-      if (zeSelectedIdx !== null) { const z = zeCurrentZones()[zeSelectedIdx]; if (z) { z.isCharName = !z.isCharName; if (z.isCharName) z.isStageDirection = false; zeRenderZones(); zeUpdateListPanel(); zeSelectZone(zeSelectedIdx); debounceSaveZones(); } }
-      return;
-    }
-    if (e.key.toLowerCase() === 's' && !e.metaKey && !e.ctrlKey) {
-      if (zeMultiSelected.size > 0) { zeMultiToggleStagDir(); return; }
-      if (zeSelectedIdx !== null) { const z = zeCurrentZones()[zeSelectedIdx]; if (z) { z.isStageDirection = !z.isStageDirection; if (z.isStageDirection) z.isCharName = false; zeRenderZones(); zeUpdateListPanel(); zeSelectZone(zeSelectedIdx); debounceSaveZones(); } }
-      return;
-    }
+  if (e.key.toLowerCase() === 'c' && !e.metaKey && !e.ctrlKey) {
+    if (zeMultiSelected.size > 0) { zeMultiToggleCharName(); return; }
+    if (zeSelectedIdx !== null) { const z = zeCurrentZones()[zeSelectedIdx]; if (z) { z.isCharName = !z.isCharName; if (z.isCharName) z.isStageDirection = false; zeRenderZones(); zeUpdateListPanel(); zeSelectZone(zeSelectedIdx); debounceSaveZones(); } }
+    return;
   }
-}
-
-/* ═══════════════════════════════════════════════════════════
-   SEND NOTES
-   ═══════════════════════════════════════════════════════════ */
-function openSendNotes() {
-  if (notes.length === 0) { toast('No notes to send'); return; }
-  sendModal.classList.add('open');
-
-  const cast = getCastMembers();
-  const byCastId = {};
-  notes.forEach(n => {
-    const castId = n.castId || n.charId; // backward compat
-    if (!byCastId[castId]) {
-      const member = cast.find(m => m.id === castId);
-      byCastId[castId] = {
-        actorName: member?.name || n.characterName || n.charName || '?',
-        actorEmail: member?.email || '',
-        color: member?.color || n.charColor || '#888',
-        notes: [],
-      };
-    }
-    byCastId[castId].notes.push(n);
-  });
-
-  const date = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
-  const show = state.activeProduction?.title || '';
-
-  const sections = Object.entries(byCastId).filter(([, d]) => d.notes.length > 0).map(([cid, data]) => {
-    const sorted = data.notes.sort((a, b) => a.page - b.page || (a.bounds?.y || 0) - (b.bounds?.y || 0));
-    const rows = sorted.map(n => {
-      const charLabel = n.characterName || n.charName || '';
-      return `<div class="send-note-row" style="border-left-color:${escapeHtml(data.color)}"><strong>p.${n.page}${n.half || ''}</strong>${charLabel ? ` [${escapeHtml(charLabel)}]` : ''} [${escapeHtml(n.type)}] <em>${escapeHtml((n.lineText || '').slice(0, 100))}</em></div>`;
-    }).join('');
-    return `<div class="send-char-section"><div class="send-char-header"><div style="width:10px;height:10px;border-radius:50%;background:${escapeHtml(data.color)};display:inline-block;"></div><span class="char-name">${escapeHtml(data.actorName)}</span>${data.actorEmail ? `<span style="font-size:11px;color:#5c5850;font-family:'DM Mono',monospace;margin-left:8px;">${escapeHtml(data.actorEmail)}</span>` : ''}</div>${rows}</div>`;
-  }).join('');
-
-  sendModal.innerHTML = `<div class="send-notes-card"><h3>Send Line Notes</h3><div style="font-family:'DM Mono',monospace;font-size:11px;color:#5c5850;margin-bottom:16px;">${date} \u00b7 ${notes.length} note${notes.length !== 1 ? 's' : ''}</div>${sections}<div class="send-notes-actions"><button class="modal-btn-primary" id="send-print">Generate Notes Report \u2197</button><button class="modal-btn-cancel" id="send-close">Close</button></div></div>`;
-  sendModal.querySelector('#send-close').addEventListener('click', () => sendModal.classList.remove('open'));
-  sendModal.querySelector('#send-print').addEventListener('click', () => {
-    const w = window.open('', '_blank');
-    if (!w) { toast('Allow popups'); return; }
-    let html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Line Notes</title><style>@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&family=DM+Sans:wght@400;500&display=swap');*{box-sizing:border-box;margin:0;padding:0}body{font-family:'DM Sans',sans-serif;background:#f5f3ee;color:#1a1814;padding:40px 48px}h1{font-family:'Instrument Serif',serif;font-size:32px;margin-bottom:6px}.meta{font-family:'DM Mono',monospace;font-size:12px;color:#999;margin-bottom:36px}.s{background:#fff;border-radius:10px;padding:22px 26px;margin-bottom:20px;box-shadow:0 2px 10px rgba(0,0,0,.07)}.sh{display:flex;align-items:center;gap:10px;margin-bottom:16px;padding-bottom:14px;border-bottom:1px solid #f0ede4}.sd{width:12px;height:12px;border-radius:50%}.sn{font-size:18px;font-weight:500;flex:1}.se{font-family:'DM Mono',monospace;font-size:11px;color:#999;margin-top:2px}.nr{display:flex;gap:12px;align-items:flex-start;padding:10px 0;border-bottom:1px solid #f5f3ee}.nr:last-child{border-bottom:none}.np{font-family:'DM Mono',monospace;font-size:10px;font-weight:500;color:#fff;padding:3px 8px;border-radius:3px;flex-shrink:0;margin-top:3px}.nd{display:flex;flex-direction:column;gap:5px}.pg{font-family:'DM Mono',monospace;font-size:11px;color:#aaa;margin-right:6px}.tl{font-size:13px;font-weight:500;color:#444}.lt{font-family:'Instrument Serif',serif;font-style:italic;font-size:15px;color:#333}@media print{body{padding:20px}}</style></head><body><h1>Line Notes</h1><div class="meta">${escapeHtml(show)} \u00b7 ${date} \u00b7 ${notes.length} note${notes.length !== 1 ? 's' : ''}</div>`;
-    Object.entries(byCastId).forEach(([, data]) => {
-      if (!data.notes.length) return;
-      const sorted = data.notes.sort((a, b) => a.page - b.page);
-      html += `<section class="s"><div class="sh"><span class="sd" style="background:${escapeHtml(data.color)}"></span><div style="flex:1"><div class="sn">${escapeHtml(data.actorName)}</div>${data.actorEmail ? `<div class="se">${escapeHtml(data.actorEmail)}</div>` : ''}</div></div>`;
-      sorted.forEach(n => {
-        const charLabel = n.characterName || n.charName || '';
-        html += `<div class="nr"><div class="np" style="background:${escapeHtml(data.color)}">${escapeHtml(n.type)}</div><div class="nd"><div><span class="pg">p.${n.page}${n.half || ''}</span>${charLabel ? `<span style="font-size:11px;color:#aaa;margin-right:6px;">[${escapeHtml(charLabel)}]</span>` : ''}<span class="tl">${NOTE_TYPES_MAP[n.type] || n.type}</span></div>${n.lineText ? `<div class="lt">\u201c${escapeHtml(n.lineText)}\u201d</div>` : ''}</div></div>`;
-      });
-      html += '</section>';
-    });
-    html += '</body></html>';
-    w.document.write(html); w.document.close();
-    sendModal.classList.remove('open'); toast('Notes report opened');
-  });
-}
-
-/* ═══════════════════════════════════════════════════════════
-   PROCESSING UI / TOAST (reuse app toast)
-   ═══════════════════════════════════════════════════════════ */
-// Wire zone editor toolbar buttons after DOM is ready
-setTimeout(() => wireZeToolbar(), 0);
+  if (e.key.toLowerCase() === 's' && !e.metaKey && !e.ctrlKey) {
+    if (zeMultiSelected.size > 0) { zeMultiToggleStagDir(); return; }
+    if (zeSelectedIdx !== null) { const z = zeCurrentZones()[zeSelectedIdx]; if (z) { z.isStageDirection = !z.isStageDirection; if (z.isStageDirection) z.isCharName = false; zeRenderZones(); zeUpdateListPanel(); zeSelectZone(zeSelectedIdx); debounceSaveZones(); } }
+    return;
+  }
+});

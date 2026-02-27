@@ -70,6 +70,10 @@ let rsScriptCuesUnsub = null;
 // Feature 4: diagrams subscription
 let rsDiagrams = [];
 let rsDiagramsUnsub = null;
+let rsDiagramZoomLevel = 1;
+
+// Timer-driven page tracking — last script page the timer navigated to
+let rsLastTimerScriptPage = 0;
 
 const NOTE_TYPES_MAP = {
   'skp': 'Skipped',
@@ -117,6 +121,38 @@ function rsScriptOffset(pdfPage, half, useSplit) {
 function rsScriptLabel(pdfPage, half) {
   const offset = rsScriptOffset(pdfPage, half, rsSplitMode);
   return offset < 0 ? ('i' + offset) : String(offset + 1);
+}
+
+/** Return the current script page number as an integer (1-based). */
+function rsCurrentScriptPage() {
+  const offset = rsScriptOffset(rsCurrentPage, rsCurrentHalf, rsSplitMode);
+  return offset + 1;
+}
+
+/**
+ * Navigate the PDF view to a given script page number (1-based).
+ * Converts script page → PDF page using the page offset, then renders.
+ */
+function rsNavigateToScriptPage(scriptPage) {
+  if (!rsPdfDoc) return;
+  const startPage = state.activeProduction?.scriptPageStartPage || 1;
+  const startHalf = state.activeProduction?.scriptPageStartHalf || '';
+  const scriptNum = scriptPage - 1; // convert 1-based to 0-based offset
+  let pdfPage, half;
+  if (rsSplitMode) {
+    const startHalfPos = (startPage - 1) * 2 + (startHalf === 'R' ? 1 : 0);
+    const targetHalfPos = startHalfPos + scriptNum;
+    pdfPage = Math.floor(targetHalfPos / 2) + 1;
+    half = (targetHalfPos % 2 === 0) ? 'L' : 'R';
+  } else {
+    pdfPage = startPage + scriptNum;
+    half = 'L';
+  }
+  const clamped = Math.max(1, Math.min(rsTotalPages, pdfPage));
+  if (clamped === rsCurrentPage && (!rsSplitMode || half === rsCurrentHalf)) return; // already there
+  rsCurrentPage = clamped;
+  rsCurrentHalf = rsSplitMode ? half : 'L';
+  rsRenderPage(rsCurrentPage);
 }
 
 function rsBuildFlatChars() {
@@ -227,7 +263,46 @@ export function initRunShow() {
     if (!panel) return;
     panel.classList.toggle('collapsed');
     if (btn) btn.textContent = panel.classList.contains('collapsed') ? '»' : '«';
+    // Show/hide zoom controls
+    const zoomControls = document.getElementById('rs-diagram-zoom-controls');
+    if (zoomControls) zoomControls.style.display = panel.classList.contains('collapsed') ? 'none' : 'flex';
   });
+
+  // Collapsible left sidebar
+  document.getElementById('rs-collapse-left')?.addEventListener('click', () => {
+    const sidebar = document.getElementById('rs-sidebar');
+    const btn = document.getElementById('rs-collapse-left');
+    if (!sidebar || !btn) return;
+    sidebar.classList.toggle('rs-collapsed');
+    btn.textContent = sidebar.classList.contains('rs-collapsed') ? '›' : '‹';
+    btn.title = sidebar.classList.contains('rs-collapsed') ? 'Show left panel' : 'Hide left panel';
+    // When sidebar collapses and diagrams exist, expand diagram panel
+    rsUpdateDiagramExpand();
+  });
+
+  // Collapsible right controls
+  document.getElementById('rs-collapse-right')?.addEventListener('click', () => {
+    const controls = document.getElementById('rs-controls');
+    const btn = document.getElementById('rs-collapse-right');
+    if (!controls || !btn) return;
+    controls.classList.toggle('rs-collapsed');
+    btn.textContent = controls.classList.contains('rs-collapsed') ? '‹' : '›';
+    btn.title = controls.classList.contains('rs-collapsed') ? 'Show right panel' : 'Hide right panel';
+    rsUpdateDiagramExpand();
+  });
+
+  // Diagram zoom controls
+  document.getElementById('rs-diagram-zoom-in')?.addEventListener('click', () => rsDiagramZoom(0.25));
+  document.getElementById('rs-diagram-zoom-out')?.addEventListener('click', () => rsDiagramZoom(-0.25));
+  document.getElementById('rs-diagram-zoom-fit')?.addEventListener('click', rsDiagramZoomFit);
+
+  // Diagram scroll-to-zoom (mouse wheel)
+  document.getElementById('rs-diagram-viewer')?.addEventListener('wheel', (e) => {
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      rsDiagramZoom(e.deltaY < 0 ? 0.15 : -0.15);
+    }
+  }, { passive: false });
 
   // Page input — accepts script page numbers ("1", "42", "i-1")
   const rsPageInput = document.getElementById('rs-page-input');
@@ -332,6 +407,9 @@ export function resetRunShow() {
   // Feature 4: clean up diagrams
   if (rsDiagramsUnsub) { rsDiagramsUnsub(); rsDiagramsUnsub = null; }
   rsDiagrams = [];
+  rsDiagramZoomLevel = 1;
+  // Reset timer page tracking
+  rsLastTimerScriptPage = 0;
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -361,7 +439,7 @@ function renderRunShowControls() {
   const secPerPage = tp > 0 ? totalSec / tp : 0;
   const nextTurnSec = secPerPage > 0 ? Math.max(0, secPerPage - (elapsed % secPerPage)) : 0;
 
-  const stageCols = renderStageColumnsHtml(session?.currentPage || rsCurrentPage);
+  const stageCols = renderStageColumnsHtml(rsCurrentScriptPage());
 
   if (!session) {
     // PRE-RUN / IDLE MODE
@@ -404,7 +482,7 @@ function renderRunShowControls() {
             <button class="timer-btn timer-btn--hold" id="rs-timer-hold" ${!timerRunning || timerHeld ? 'disabled' : ''}>Hold Page</button>
             <button class="timer-btn timer-btn--stop" id="rs-timer-stop" ${!timerRunning && !timerHeld ? 'disabled' : ''}>Stop</button>
           </div>
-          <div class="rs-timer-page">Page: <strong>${rsScriptLabel(session.currentPage)}</strong></div>
+          <div class="rs-timer-page">Page: <strong>${rsScriptLabel(rsCurrentPage, rsCurrentHalf)}</strong></div>
         </div>
         <div class="rs-stage-widget">${stageCols}</div>
         <div class="rs-scratchpad-section">
@@ -456,6 +534,13 @@ function rsTickTimerDisplay() {
   const secPerPage = tp > 0 ? totalSec / tp : 0;
   const nextTurnSec = secPerPage > 0 ? Math.max(0, secPerPage - (elapsed % secPerPage)) : 0;
 
+  // Auto-advance PDF page when timer advances (unless held)
+  const timerPage = session.currentPage || 1;
+  if (session.timerRunning && !session.timerHeld && timerPage !== rsLastTimerScriptPage) {
+    rsLastTimerScriptPage = timerPage;
+    rsNavigateToScriptPage(timerPage);
+  }
+
   // Update progress bar
   const progressBar = document.querySelector('.rs-timer-progress-bar');
   if (progressBar) progressBar.style.width = pct + '%';
@@ -472,7 +557,7 @@ function rsTickTimerDisplay() {
 
   // Update page display
   const pageEl = document.querySelector('.rs-timer-page');
-  if (pageEl) pageEl.innerHTML = 'Page: <strong>' + rsScriptLabel(session.currentPage) + '</strong>';
+  if (pageEl) pageEl.innerHTML = 'Page: <strong>' + rsScriptLabel(rsCurrentPage, rsCurrentHalf) + '</strong>';
 
   // Update button states
   const timerRunning = session.timerRunning;
@@ -484,9 +569,9 @@ function rsTickTimerDisplay() {
   if (holdBtn) holdBtn.disabled = !timerRunning || timerHeld;
   if (stopBtn) stopBtn.disabled = !timerRunning && !timerHeld;
 
-  // Update stage columns (these don't contain editable fields)
+  // Update stage columns — always based on the actual visible page
   const stageWidget = document.querySelector('.rs-stage-widget');
-  if (stageWidget) stageWidget.innerHTML = renderStageColumnsHtml(session.currentPage || rsCurrentPage);
+  if (stageWidget) stageWidget.innerHTML = renderStageColumnsHtml(rsCurrentScriptPage());
 }
 
 function renderStageColumnsHtml(page) {
@@ -651,7 +736,7 @@ function rsSubscribeToScriptCues() {
 function rsRenderCueBanner() {
   const banner = document.getElementById('rs-cue-banner');
   if (!banner) return;
-  const pageCues = rsScriptCues.filter(c => c.page === rsCurrentPage);
+  const pageCues = rsScriptCues.filter(c => c.page === rsCurrentScriptPage());
   if (pageCues.length === 0) { banner.innerHTML = ''; return; }
   banner.innerHTML = pageCues.map(c => {
     const typeClass = ['LX', 'SQ', 'PX'].includes(c.type) ? c.type : 'OTHER';
@@ -675,23 +760,69 @@ function rsSubscribeToDiagrams() {
 function rsRenderDiagramPanel() {
   const panel = document.getElementById('rs-diagram-panel');
   const imagesDiv = document.getElementById('rs-diagram-images');
+  const zoomControls = document.getElementById('rs-diagram-zoom-controls');
   if (!panel || !imagesDiv) return;
-  const pageDiagrams = rsDiagrams.filter(d => d.page === rsCurrentPage);
+  const pageDiagrams = rsDiagrams.filter(d => d.page === rsCurrentScriptPage());
   if (pageDiagrams.length === 0) {
     panel.classList.add('collapsed');
+    panel.classList.remove('diagram-expanded');
     const toggleBtn = document.getElementById('rs-diagram-toggle');
     if (toggleBtn) toggleBtn.textContent = '»';
+    if (zoomControls) zoomControls.style.display = 'none';
     imagesDiv.innerHTML = '';
     return;
   }
   panel.classList.remove('collapsed');
+  rsUpdateDiagramExpand();
   const toggleBtn = document.getElementById('rs-diagram-toggle');
   if (toggleBtn) toggleBtn.textContent = '«';
+  if (zoomControls) zoomControls.style.display = 'flex';
+  // Reset zoom on page change
+  rsDiagramZoomLevel = 1;
+  rsApplyDiagramZoom();
   imagesDiv.innerHTML = pageDiagrams.map(d => `
-    <div style="margin-bottom:12px;">
-      <img src="${escapeHtml(d.url)}" style="width:100%;height:auto;border-radius:4px;" />
+    <div class="rs-diagram-item">
+      <img src="${escapeHtml(d.url)}" draggable="false" />
       ${d.label ? `<div style="font-family:'DM Mono',monospace;font-size:10px;color:#5c5850;margin-top:4px;">${escapeHtml(d.label)}</div>` : ''}
     </div>`).join('');
+}
+
+/** Update diagram panel expansion based on whether side panels are collapsed */
+function rsUpdateDiagramExpand() {
+  const panel = document.getElementById('rs-diagram-panel');
+  if (!panel || panel.classList.contains('collapsed')) return;
+  const sidebar = document.getElementById('rs-sidebar');
+  const controls = document.getElementById('rs-controls');
+  const leftCollapsed = sidebar?.classList.contains('rs-collapsed');
+  const rightCollapsed = controls?.classList.contains('rs-collapsed');
+  if (leftCollapsed || rightCollapsed) {
+    panel.classList.add('diagram-expanded');
+  } else {
+    panel.classList.remove('diagram-expanded');
+  }
+}
+
+/** Zoom diagrams by a delta amount */
+function rsDiagramZoom(delta) {
+  rsDiagramZoomLevel = Math.max(0.25, Math.min(5, rsDiagramZoomLevel + delta));
+  rsApplyDiagramZoom();
+}
+
+/** Fit diagrams to the viewer width */
+function rsDiagramZoomFit() {
+  rsDiagramZoomLevel = 1;
+  rsApplyDiagramZoom();
+}
+
+/** Apply current zoom level to diagram viewer */
+function rsApplyDiagramZoom() {
+  const inner = document.getElementById('rs-diagram-images');
+  const label = document.getElementById('rs-diagram-zoom-level');
+  if (inner) {
+    inner.style.transform = `scale(${rsDiagramZoomLevel})`;
+    inner.style.transformOrigin = '0 0';
+  }
+  if (label) label.textContent = Math.round(rsDiagramZoomLevel * 100) + '%';
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -1459,8 +1590,7 @@ function openFabPopover() {
     if (rsPendingNote && rsPendingNote.page) {
       pageLabel.textContent = 'Page ' + rsScriptLabel(rsPendingNote.page, rsPendingNote.half);
     } else {
-      const curPdfPage = state.runSession?.currentPage || 1;
-      pageLabel.textContent = 'Page ' + rsScriptLabel(curPdfPage);
+      pageLabel.textContent = 'Page ' + rsScriptLabel(rsCurrentPage, rsCurrentHalf);
     }
   }
 
@@ -1528,7 +1658,7 @@ async function confirmFabNote() {
     characterName: fc.name,
     charColor: fc.color,
     type: fabSelectedType,
-    page: fromZone ? rsPendingNote.page : (state.runSession?.currentPage || rsCurrentPage),
+    page: fromZone ? rsPendingNote.page : rsCurrentPage,
     half: fromZone ? (rsPendingNote.half || '') : '',
     zoneIdx: fromZone ? rsPendingNote.zoneIdx : null,
     bounds: fromZone ? rsPendingNote.bounds : null,

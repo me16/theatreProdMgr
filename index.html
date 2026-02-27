@@ -759,6 +759,10 @@
     .rs-sidebar {
       width:280px; min-width:280px; border-right:1px solid #2e2c29;
       background:#1a1916; display:flex; flex-direction:column; overflow-y:auto;
+      transition:width 0.25s ease, min-width 0.25s ease, opacity 0.2s ease;
+    }
+    .rs-sidebar.rs-collapsed {
+      width:0; min-width:0; overflow:hidden; opacity:0; border-right:none;
     }
     .rs-sidebar-header {
       display:flex; align-items:center; gap:10px;
@@ -771,8 +775,27 @@
     .rs-controls {
       width:320px; min-width:280px; border-left:1px solid #2e2c29;
       background:#1a1916; display:flex; flex-direction:column; overflow-y:auto;
+      transition:width 0.25s ease, min-width 0.25s ease, opacity 0.2s ease;
+    }
+    .rs-controls.rs-collapsed {
+      width:0; min-width:0; overflow:hidden; opacity:0; border-left:none;
     }
     .rs-controls-inner { padding:16px; display:flex; flex-direction:column; gap:14px; }
+
+    /* Collapse toggle buttons */
+    .rs-collapse-btn {
+      position:absolute; top:50%; z-index:30; width:20px; height:48px;
+      background:#232220; border:1px solid #3d3a36; color:#9a9488;
+      font-size:14px; cursor:pointer; display:flex; align-items:center; justify-content:center;
+      transition:all 0.2s; padding:0;
+    }
+    .rs-collapse-btn:hover { background:#2e2c29; color:#e8e4dc; border-color:#5c5850; }
+    .rs-collapse-btn--left {
+      left:0; transform:translateY(-50%); border-radius:0 6px 6px 0; border-left:none;
+    }
+    .rs-collapse-btn--right {
+      right:0; transform:translateY(-50%); border-radius:6px 0 0 6px; border-right:none;
+    }
 
     /* Run Show — Start button */
     .rs-start-run-btn {
@@ -884,10 +907,42 @@
     .rs-cue-pill--FLY, .rs-cue-pill--CARP, .rs-cue-pill--OTHER { background:#2E2C29; color:#9A9488; }
 
     /* ===== FEATURE 4: Diagram panel ===== */
-    .diagram-panel { width:220px; min-width:220px; border-right:1px solid #2e2c29; background:#141312; display:flex; flex-direction:column; overflow-y:auto; transition:width 0.2s; }
+    .diagram-panel { width:220px; min-width:220px; border-right:1px solid #2e2c29; background:#141312; display:flex; flex-direction:column; overflow:hidden; transition:width 0.25s ease, min-width 0.25s ease; }
     .diagram-panel.collapsed { width:24px; min-width:24px; overflow:hidden; }
+    .diagram-panel.diagram-expanded { width:100%; min-width:0; flex:1; }
     .diagram-panel img { width:100%; height:auto; border-radius:4px; margin-bottom:8px; }
-    .diagram-toggle-btn { width:100%; background:none; border:none; color:#5c5850; cursor:pointer; padding:6px 0; font-size:16px; }
+    .diagram-toggle-btn { width:100%; background:none; border:none; color:#5c5850; cursor:pointer; padding:6px 0; font-size:16px; flex-shrink:0; }
+    .diagram-toggle-btn:hover { color:#9a9488; }
+
+    /* Diagram viewer (zoom/scroll) */
+    .rs-diagram-viewer {
+      position:relative; overflow:auto; cursor:grab; flex:1; min-height:0;
+      scrollbar-width:thin; scrollbar-color:#444 transparent;
+    }
+    .rs-diagram-viewer:active { cursor:grabbing; }
+    .rs-diagram-viewer-inner {
+      transform-origin:0 0; transition:transform 0.1s ease-out;
+      display:flex; flex-direction:column; gap:12px; padding:8px; min-width:min-content;
+    }
+    .rs-diagram-item { position:relative; }
+    .rs-diagram-item img {
+      display:block; width:100%; height:auto; border-radius:4px;
+      user-select:none; -webkit-user-drag:none;
+    }
+    .rs-diagram-zoom-controls {
+      display:flex; gap:4px; padding:4px 8px; border-bottom:1px solid #2e2c29;
+      background:#1a1916; flex-shrink:0; align-items:center;
+    }
+    .rs-diagram-zoom-btn {
+      width:26px; height:26px; background:#232220; border:1px solid #3d3a36;
+      color:#9a9488; border-radius:4px; cursor:pointer; font-size:14px;
+      display:flex; align-items:center; justify-content:center; padding:0;
+    }
+    .rs-diagram-zoom-btn:hover { background:#2e2c29; color:#e8e4dc; border-color:#5c5850; }
+    .rs-diagram-zoom-level {
+      font-family:'DM Mono',monospace; font-size:10px; color:#5c5850;
+      min-width:36px; text-align:center;
+    }
 
     /* ===== FEATURE 7: Email Notes modal ===== */
     .email-actor-row { display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid #2e2c29; }
@@ -1100,11 +1155,22 @@
           <!-- Diagram panel (Feature 4) -->
           <div class="diagram-panel collapsed" id="rs-diagram-panel">
             <button class="diagram-toggle-btn" id="rs-diagram-toggle">»</button>
-            <div id="rs-diagram-images" style="padding:8px;"></div>
+            <div class="rs-diagram-zoom-controls" id="rs-diagram-zoom-controls" style="display:none;">
+              <button class="rs-diagram-zoom-btn" id="rs-diagram-zoom-out" title="Zoom out">−</button>
+              <span class="rs-diagram-zoom-level" id="rs-diagram-zoom-level">100%</span>
+              <button class="rs-diagram-zoom-btn" id="rs-diagram-zoom-in" title="Zoom in">+</button>
+              <button class="rs-diagram-zoom-btn" id="rs-diagram-zoom-fit" title="Fit to panel" style="font-size:11px;">⊞</button>
+            </div>
+            <div class="rs-diagram-viewer" id="rs-diagram-viewer">
+              <div class="rs-diagram-viewer-inner" id="rs-diagram-images"></div>
+            </div>
           </div>
 
           <!-- CENTER: Script PDF, hit overlay, popover, FAB -->
           <div class="rs-script-area" id="rs-script-area">
+            <!-- Panel collapse toggles -->
+            <button class="rs-collapse-btn rs-collapse-btn--left" id="rs-collapse-left" title="Toggle left panel">‹</button>
+            <button class="rs-collapse-btn rs-collapse-btn--right" id="rs-collapse-right" title="Toggle right panel">›</button>
             <!-- Page nav header -->
             <div class="ln-header" style="flex-shrink:0;">
               <div class="ln-page-nav" id="rs-page-nav" style="display:none;">

@@ -64,6 +64,16 @@ service cloud.firestore {
         allow update: if resource.data.createdBy == request.auth.uid || isOwner(productionId) || isSuperAdmin();
         allow delete: if resource.data.createdBy == request.auth.uid || isOwner(productionId) || isSuperAdmin();
       }
+      // Diagrams — Feature 4: image diagrams linked to script pages
+      match /diagrams/{diagramId} {
+        allow read: if isMember(productionId) || isSuperAdmin();
+        allow create, update, delete: if isOwner(productionId) || isSuperAdmin();
+      }
+      // Script Cues — Feature 5: embedded cues (LX/SQ/PX/FLY/CARP/OTHER) per page
+      match /scriptCues/{cueId} {
+        allow read: if isMember(productionId) || isSuperAdmin();
+        allow create, update, delete: if isOwner(productionId) || isSuperAdmin();
+      }
     }
   }
 }

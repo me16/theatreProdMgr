@@ -2,7 +2,7 @@ import { db, auth } from '../firebase.js';
 import { state } from '../shared/state.js';
 import { isOwner } from '../shared/roles.js';
 import { toast } from '../shared/toast.js';
-import { escapeHtml, sanitizeName, confirmDialog } from '../shared/ui.js';
+import { escapeHtml, sanitizeName, confirmDialog, downloadCSV } from '../shared/ui.js';
 import {
   collection, doc, addDoc, updateDoc, deleteDoc, onSnapshot,
   serverTimestamp
@@ -249,6 +249,7 @@ function renderManageTab() {
   }
 
   content.innerHTML = `
+    ${isOwner() ? '<div style="display:flex;gap:8px;margin-bottom:16px;"><button class="settings-btn" id="props-import-btn">Import JSON</button><button class="settings-btn" id="props-export-btn">Export CSV</button></div>' : ''}
     <div class="prop-form">
       <h3>${editingPropId ? 'Edit Prop' : 'Add Prop'}</h3>
       <div class="form-row">
@@ -298,6 +299,9 @@ function renderManageTab() {
   });
   content.querySelectorAll('.edit-prop-btn').forEach(btn => btn.addEventListener('click', () => startEdit(btn.dataset.id)));
   content.querySelectorAll('.delete-prop-btn').forEach(btn => btn.addEventListener('click', () => deleteProp(btn.dataset.id)));
+  // Feature 6: Import/Export
+  content.querySelector('#props-import-btn')?.addEventListener('click', importPropsJSON);
+  content.querySelector('#props-export-btn')?.addEventListener('click', exportPropsCSV);
 }
 
 function syncCueRowsFromDOM() {
@@ -707,4 +711,55 @@ function renderCheckTab() {
       renderContent();
     });
   });
+}
+
+/* ═══════════════════════════════════════════════════════════
+   FEATURE 6: IMPORT/EXPORT PROPS
+   ═══════════════════════════════════════════════════════════ */
+function exportPropsCSV() {
+  if (props.length === 0) { toast('No props to export.', 'warn'); return; }
+  const maxCues = Math.max(1, ...props.map(p => (p.cues || []).length));
+  const header = ['name', 'start', 'endLocation'];
+  for (let i = 1; i <= maxCues; i++) { header.push('cue_' + i + '_enterPage', 'cue_' + i + '_exitPage', 'cue_' + i + '_exitLocation', 'cue_' + i + '_carrierOn', 'cue_' + i + '_carrierOff'); }
+  const rows = [header];
+  props.forEach(p => {
+    const cues = p.cues || [];
+    const endLoc = cues.length > 0 ? cues[cues.length - 1].exitLocation : (p.endLocation || p.start);
+    const row = [p.name, p.start, endLoc];
+    for (let i = 0; i < maxCues; i++) { const c = cues[i]; if (c) { row.push(c.enterPage, c.exitPage, c.exitLocation || '', c.carrierOn || '', c.carrierOff || ''); } else { row.push('', '', '', '', ''); } }
+    rows.push(row);
+  });
+  const title = (state.activeProduction?.title || 'production').replace(/[^a-zA-Z0-9]/g, '_');
+  downloadCSV(rows, 'props_' + title + '_' + new Date().toISOString().split('T')[0] + '.csv');
+  toast('Props exported.', 'success');
+}
+
+function importPropsJSON() {
+  if (!isOwner()) return;
+  const input = document.createElement('input'); input.type = 'file'; input.accept = '.json';
+  input.addEventListener('change', async () => {
+    const file = input.files[0]; if (!file) return;
+    try {
+      const data = JSON.parse(await file.text());
+      if (!Array.isArray(data)) { toast('JSON must be an array of props.', 'error'); return; }
+      for (let i = 0; i < data.length; i++) {
+        const p = data[i];
+        if (!p.name || typeof p.name !== 'string') { toast('Item ' + (i+1) + ': name is required.', 'error'); return; }
+        if (!['SL', 'SR'].includes(p.start)) { toast('Item ' + (i+1) + ': start must be SL or SR.', 'error'); return; }
+        if (!Array.isArray(p.cues) || p.cues.length === 0) { toast('Item ' + (i+1) + ': at least one cue required.', 'error'); return; }
+        for (let j = 0; j < p.cues.length; j++) {
+          if (!Number.isInteger(p.cues[j].enterPage) || p.cues[j].enterPage < 1) { toast('Item ' + (i+1) + ', Cue ' + (j+1) + ': enterPage must be a positive integer.', 'error'); return; }
+          if (!Number.isInteger(p.cues[j].exitPage) || p.cues[j].exitPage < 1) { toast('Item ' + (i+1) + ', Cue ' + (j+1) + ': exitPage must be a positive integer.', 'error'); return; }
+        }
+      }
+      if (!confirmDialog('Found ' + data.length + ' props. Import will ADD to existing props — duplicates not checked. Continue?')) return;
+      const pid = state.activeProduction.id;
+      for (const p of data) {
+        const cues = p.cues.map(c => ({ enterPage: c.enterPage, exitPage: c.exitPage, exitLocation: c.exitLocation || 'SL', carrierOn: c.carrierOn || '', carrierOnCastId: '', carrierOff: c.carrierOff || '', carrierOffCastId: '' }));
+        await addDoc(collection(db, 'productions', pid, 'props'), { name: sanitizeName(p.name), start: p.start, cues, enters: cues.map(c => c.enterPage), exits: cues.map(c => c.exitPage), endLocation: cues[cues.length - 1].exitLocation, createdAt: serverTimestamp() });
+      }
+      toast('Imported ' + data.length + ' props.', 'success');
+    } catch(e) { toast('Invalid JSON: ' + e.message, 'error'); }
+  });
+  input.click();
 }

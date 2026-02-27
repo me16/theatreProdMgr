@@ -17,7 +17,7 @@ import { db, storage } from '../firebase.js';
 import { state } from '../shared/state.js';
 import { isOwner } from '../shared/roles.js';
 import { toast } from '../shared/toast.js';
-import { escapeHtml, sanitizeName, genId, confirmDialog } from '../shared/ui.js';
+import { escapeHtml, sanitizeName, genId, confirmDialog, downloadCSV } from '../shared/ui.js';
 import {
   collection, doc, addDoc, updateDoc, deleteDoc, onSnapshot, getDoc, getDocs,
   serverTimestamp, query, where, orderBy
@@ -59,6 +59,17 @@ let rsDrawing = false;
 let rsPopoverOpen = false;
 let _rsPopCloseGuard = false;
 let rsPendingNote = null;
+
+// Feature 3: persists between runs so we can show last session's notes
+let rsLastSessionId = null;
+
+// Feature 5: script cues subscription
+let rsScriptCues = [];
+let rsScriptCuesUnsub = null;
+
+// Feature 4: diagrams subscription
+let rsDiagrams = [];
+let rsDiagramsUnsub = null;
 
 const NOTE_TYPES_MAP = {
   'skp': 'Skipped',
@@ -139,7 +150,7 @@ export function initRunShow() {
   // Register the timer re-render callback with props.js
   setRunShowNotifyCallback(() => {
     if (document.getElementById('tab-runshow')?.classList.contains('tab-panel--active')) {
-      renderRunShowControls();
+      rsTickTimerDisplay(); // lightweight update — no full re-render
     }
   });
 
@@ -206,6 +217,18 @@ export function initRunShow() {
   document.getElementById('rs-split-btn')?.addEventListener('click', rsToggleSplitMode);
   document.getElementById('rs-send-btn')?.addEventListener('click', rsOpenSendNotes);
 
+  // Feature 7: Email Notes button
+  document.getElementById('rs-email-notes-btn')?.addEventListener('click', rsOpenEmailNotes);
+
+  // Feature 4: Diagram panel toggle
+  document.getElementById('rs-diagram-toggle')?.addEventListener('click', () => {
+    const panel = document.getElementById('rs-diagram-panel');
+    const btn = document.getElementById('rs-diagram-toggle');
+    if (!panel) return;
+    panel.classList.toggle('collapsed');
+    if (btn) btn.textContent = panel.classList.contains('collapsed') ? '»' : '«';
+  });
+
   // Page input — accepts script page numbers ("1", "42", "i-1")
   const rsPageInput = document.getElementById('rs-page-input');
   if (rsPageInput) {
@@ -264,6 +287,8 @@ export async function onRunShowTabActivated() {
     await rsLoadScriptPageOffset();
     document.getElementById('rs-show-name').textContent = state.activeProduction?.title || '';
     rsSubscribeToNotes();
+    rsSubscribeToScriptCues(); // Feature 5
+    rsSubscribeToDiagrams();   // Feature 4
     rsLoadScript();
   }
   renderRunShowTab();
@@ -301,6 +326,12 @@ export function resetRunShow() {
   rsFlatChars = [];
   rsLineZones = {};
   rsRenderGen = 0;
+  // Feature 5: clean up script cues
+  if (rsScriptCuesUnsub) { rsScriptCuesUnsub(); rsScriptCuesUnsub = null; }
+  rsScriptCues = [];
+  // Feature 4: clean up diagrams
+  if (rsDiagramsUnsub) { rsDiagramsUnsub(); rsDiagramsUnsub = null; }
+  rsDiagrams = [];
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -405,6 +436,59 @@ function renderRunShowControls() {
   }
 }
 
+
+
+/* ═══════════════════════════════════════════════════════════
+   TIMER TICK — lightweight update (no full re-render)
+   Updates only the timer values without replacing the entire
+   controls panel HTML, preserving scratchpad focus and state.
+   ═══════════════════════════════════════════════════════════ */
+function rsTickTimerDisplay() {
+  const session = state.runSession;
+  if (!session) return;
+
+  const elapsed = session.timerElapsed || 0;
+  const totalSec = (session.timerDuration || 120) * 60;
+  const pct = totalSec > 0 ? Math.min(100, (elapsed / totalSec) * 100) : 0;
+  const elapsedStr = formatTime(elapsed);
+  const remainStr = formatTime(Math.max(0, totalSec - elapsed));
+  const tp = session.timerTotalPages || 100;
+  const secPerPage = tp > 0 ? totalSec / tp : 0;
+  const nextTurnSec = secPerPage > 0 ? Math.max(0, secPerPage - (elapsed % secPerPage)) : 0;
+
+  // Update progress bar
+  const progressBar = document.querySelector('.rs-timer-progress-bar');
+  if (progressBar) progressBar.style.width = pct + '%';
+
+  // Update timer display text
+  const timerDisplay = document.querySelector('.rs-timer-display');
+  if (timerDisplay) {
+    timerDisplay.innerHTML = '<span>Elapsed: ' + elapsedStr + '</span><span>Remaining: ' + remainStr + '</span><span>Next turn: ' + formatTime(nextTurnSec) + '</span>';
+  }
+
+  // Update elapsed in session header
+  const elapsedEl = document.querySelector('.rs-session-elapsed');
+  if (elapsedEl) elapsedEl.textContent = elapsedStr;
+
+  // Update page display
+  const pageEl = document.querySelector('.rs-timer-page');
+  if (pageEl) pageEl.innerHTML = 'Page: <strong>' + rsScriptLabel(session.currentPage) + '</strong>';
+
+  // Update button states
+  const timerRunning = session.timerRunning;
+  const timerHeld = session.timerHeld;
+  const startBtn = document.getElementById('rs-timer-start');
+  const holdBtn = document.getElementById('rs-timer-hold');
+  const stopBtn = document.getElementById('rs-timer-stop');
+  if (startBtn) { startBtn.disabled = timerRunning && !timerHeld; startBtn.textContent = timerHeld ? 'Resume' : 'Start'; }
+  if (holdBtn) holdBtn.disabled = !timerRunning || timerHeld;
+  if (stopBtn) stopBtn.disabled = !timerRunning && !timerHeld;
+
+  // Update stage columns (these don't contain editable fields)
+  const stageWidget = document.querySelector('.rs-stage-widget');
+  if (stageWidget) stageWidget.innerHTML = renderStageColumnsHtml(session.currentPage || rsCurrentPage);
+}
+
 function renderStageColumnsHtml(page) {
   const props = getProps();
   if (!props.length) return '<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:16px;">No props yet.</div>';
@@ -495,10 +579,11 @@ function renderRunShowSidebar() {
           <span class="note-type-label">${escapeHtml(n.type)}</span>
         </div>
         ${n.lineText ? `<div class="note-text-preview">&#x201c;${escapeHtml(n.lineText.slice(0, 80))}&#x201d;</div>` : ''}
+        ${n.noteBody ? `<div class="note-text-preview" style="color:#c8a96e;font-style:normal;"><strong>Note:</strong> ${escapeHtml(n.noteBody.slice(0, 100))}</div>` : ''}
       </div>
       <button class="note-delete-btn" data-noteid="${escapeHtml(n.id)}">&times;</button>
     </div>`;
-  }).join('') || '<div style="color:#5c5850;font-size:12px;padding:12px;">No notes yet.</div>';
+  }).join('') || '<div style="color:#5c5850;font-size:12px;padding:12px;">No notes yet for this run.</div>';
 
   notesList.querySelectorAll('.note-item').forEach(el => el.addEventListener('click', e => {
     if (e.target.classList.contains('note-delete-btn')) return;
@@ -520,18 +605,21 @@ function renderRunShowSidebar() {
 function rsSubscribeToNotes() {
   if (rsNotesUnsub) rsNotesUnsub();
   const pid = state.activeProduction.id;
+  // Feature 3: filter notes by session ID (client-side to avoid index)
+  const sessionId = state.runSession?.sessionId || rsLastSessionId;
+  const applyFilter = (allNotes) => sessionId ? allNotes.filter(n => n.sessionId === sessionId) : allNotes;
   try {
     rsNotesUnsub = onSnapshot(
-      query(collection(db, 'productions', pid, 'lineNotes'), where('productionId', '==', pid)),
+      collection(db, 'productions', pid, 'lineNotes'),
       snap => {
-        rsNotes = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        rsNotes = applyFilter(snap.docs.map(d => ({ id: d.id, ...d.data() })));
         renderRunShowSidebar();
         if (rsPdfDoc) rsRedrawOverlay(rsCurrentPage);
       },
       err => {
         if (rsNotesUnsub) { rsNotesUnsub(); rsNotesUnsub = null; }
         rsNotesUnsub = onSnapshot(collection(db, 'productions', pid, 'lineNotes'), snap => {
-          rsNotes = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+          rsNotes = applyFilter(snap.docs.map(d => ({ id: d.id, ...d.data() })));
           renderRunShowSidebar();
           if (rsPdfDoc) rsRedrawOverlay(rsCurrentPage);
         });
@@ -539,12 +627,71 @@ function rsSubscribeToNotes() {
     );
   } catch(e) {
     rsNotesUnsub = onSnapshot(collection(db, 'productions', pid, 'lineNotes'), snap => {
-      rsNotes = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      rsNotes = applyFilter(snap.docs.map(d => ({ id: d.id, ...d.data() })));
       renderRunShowSidebar();
       if (rsPdfDoc) rsRedrawOverlay(rsCurrentPage);
     });
   }
   state.unsubscribers.push(() => { if (rsNotesUnsub) { rsNotesUnsub(); rsNotesUnsub = null; } });
+}
+
+/* ═══════════════════════════════════════════════════════════
+   FEATURE 5: SCRIPT CUES SUBSCRIPTION
+   ═══════════════════════════════════════════════════════════ */
+function rsSubscribeToScriptCues() {
+  if (rsScriptCuesUnsub) rsScriptCuesUnsub();
+  const pid = state.activeProduction.id;
+  rsScriptCuesUnsub = onSnapshot(collection(db, 'productions', pid, 'scriptCues'), snap => {
+    rsScriptCues = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    rsRenderCueBanner();
+  });
+  state.unsubscribers.push(() => { if (rsScriptCuesUnsub) { rsScriptCuesUnsub(); rsScriptCuesUnsub = null; } });
+}
+
+function rsRenderCueBanner() {
+  const banner = document.getElementById('rs-cue-banner');
+  if (!banner) return;
+  const pageCues = rsScriptCues.filter(c => c.page === rsCurrentPage);
+  if (pageCues.length === 0) { banner.innerHTML = ''; return; }
+  banner.innerHTML = pageCues.map(c => {
+    const typeClass = ['LX', 'SQ', 'PX'].includes(c.type) ? c.type : 'OTHER';
+    return `<span class="rs-cue-pill rs-cue-pill--${escapeHtml(typeClass)}" title="${escapeHtml(c.label || '')}">${escapeHtml(c.label || c.type)}</span>`;
+  }).join('');
+}
+
+/* ═══════════════════════════════════════════════════════════
+   FEATURE 4: DIAGRAMS SUBSCRIPTION
+   ═══════════════════════════════════════════════════════════ */
+function rsSubscribeToDiagrams() {
+  if (rsDiagramsUnsub) rsDiagramsUnsub();
+  const pid = state.activeProduction.id;
+  rsDiagramsUnsub = onSnapshot(collection(db, 'productions', pid, 'diagrams'), snap => {
+    rsDiagrams = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    rsRenderDiagramPanel();
+  });
+  state.unsubscribers.push(() => { if (rsDiagramsUnsub) { rsDiagramsUnsub(); rsDiagramsUnsub = null; } });
+}
+
+function rsRenderDiagramPanel() {
+  const panel = document.getElementById('rs-diagram-panel');
+  const imagesDiv = document.getElementById('rs-diagram-images');
+  if (!panel || !imagesDiv) return;
+  const pageDiagrams = rsDiagrams.filter(d => d.page === rsCurrentPage);
+  if (pageDiagrams.length === 0) {
+    panel.classList.add('collapsed');
+    const toggleBtn = document.getElementById('rs-diagram-toggle');
+    if (toggleBtn) toggleBtn.textContent = '»';
+    imagesDiv.innerHTML = '';
+    return;
+  }
+  panel.classList.remove('collapsed');
+  const toggleBtn = document.getElementById('rs-diagram-toggle');
+  if (toggleBtn) toggleBtn.textContent = '«';
+  imagesDiv.innerHTML = pageDiagrams.map(d => `
+    <div style="margin-bottom:12px;">
+      <img src="${escapeHtml(d.url)}" style="width:100%;height:auto;border-radius:4px;" />
+      ${d.label ? `<div style="font-family:'DM Mono',monospace;font-size:10px;color:#5c5850;margin-top:4px;">${escapeHtml(d.label)}</div>` : ''}
+    </div>`).join('');
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -714,6 +861,8 @@ async function rsRenderPage(num) {
   if (hitOverlay) hitOverlay.innerHTML = '';
   rsRenderLineZones(zKey);
   rsRenderNoteMarkers(num, rsCurrentHalf);
+  rsRenderCueBanner();      // Feature 5
+  rsRenderDiagramPanel();   // Feature 4
 }
 
 async function loadOrExtractZonesLocal(page, num, viewport, zKey) {
@@ -962,14 +1111,29 @@ function rsRedrawOverlay(num) {
 function rsOpenPopover(e, pageNum, half, zoneIdx, zone) {
   e.stopPropagation();
   if (rsFlatChars.length === 0) { toast('Add cast members first — go to Cast & Crew tab'); return; }
+  // Feature 1: For NEW notes, route through FAB quick-note popover instead
   rsPendingNote = {
     page: pageNum, half: rsSplitMode ? half : '', zoneIdx,
     bounds: { x: zone.x, y: zone.y, w: zone.w, h: Math.max(zone.h, 1.5) },
     lineText: zone.text || ''
   };
-  rsBuildPopover(null, null, zone.text);
-  rsPositionPopover(e.clientX, e.clientY);
-  rsShowPopover();
+  openFabPopover();
+  // Show the zone's script text as a read-only preview
+  const linePreview = document.getElementById('rnp-line-preview');
+  if (linePreview) {
+    const lineText = (zone.text || '').trim();
+    if (lineText) {
+      linePreview.textContent = '\u201c' + lineText.slice(0, 150) + '\u201d';
+      linePreview.style.display = 'block';
+    } else {
+      linePreview.style.display = 'none';
+    }
+  }
+  // Clear the note input (SM types fresh note here)
+  const textInput = document.getElementById('rnp-text');
+  if (textInput) textInput.value = '';
+  const pageLabel = document.getElementById('rnp-page-label');
+  if (pageLabel) pageLabel.textContent = 'Page ' + rsScriptLabel(pageNum, half);
 }
 
 function rsOpenEditPopover(e, note) {
@@ -977,6 +1141,9 @@ function rsOpenEditPopover(e, note) {
   rsPendingNote = { editId: note.id, page: note.page, half: note.half || '', bounds: note.bounds, lineText: note.lineText || '' };
   const fc = rsFlatChars.find(c => c.castId === note.castId && c.name === (note.characterName || note.charName));
   rsBuildPopover(fc?.id || note.charId || null, note.type, note.lineText);
+  // Feature 2: Pre-fill the note body textarea
+  const noteTextEl = document.getElementById('rs-pop-note-text');
+  if (noteTextEl) noteTextEl.value = note.noteBody || '';
   rsPositionPopover(e.clientX, e.clientY);
   rsShowPopover();
 }
@@ -1067,6 +1234,9 @@ function rsShowPopover() {
 function rsClosePopover() {
   const popoverEl = document.getElementById('rs-note-popover');
   if (popoverEl) popoverEl.style.display = 'none';
+  // Feature 2: Clear the note text textarea
+  const noteTextEl = document.getElementById('rs-pop-note-text');
+  if (noteTextEl) noteTextEl.value = '';
   rsPendingNote = null;
   rsPopoverOpen = false;
 }
@@ -1075,7 +1245,9 @@ async function rsConfirmNote() {
   if (!rsPendingNote || rsActiveCharIdx < 0 || !rsFlatChars[rsActiveCharIdx]) return;
   const fc = rsFlatChars[rsActiveCharIdx];
   const pid = state.activeProduction.id;
-  // Write sessionId: current session id, or null if no session active
+  // Feature 2: Read the optional note text from the zone popover textarea
+  const noteTextEl = document.getElementById('rs-pop-note-text');
+  const noteBody = noteTextEl ? noteTextEl.value.trim() : '';
   const noteData = {
     uid: state.currentUser.uid,
     castId: fc.castId,
@@ -1087,6 +1259,7 @@ async function rsConfirmNote() {
     zoneIdx: rsPendingNote.zoneIdx ?? null,
     bounds: rsPendingNote.bounds,
     lineText: rsPendingNote.lineText || '',
+    noteBody: noteBody, // Feature 2: SM's typed remark
     productionId: pid,
     sessionId: state.runSession?.sessionId || null,
   };
@@ -1150,9 +1323,13 @@ function rsGlobalMouseUp(e) {
   const pw = wrapper.offsetWidth, ph = wrapper.offsetHeight;
   const bounds = { x: (x / pw) * 100, y: (y / ph) * 100, w: (w / pw) * 100, h: (h / ph) * 100 };
   rsPendingNote = { page: rsCurrentPage, half: rsSplitMode ? rsCurrentHalf : '', bounds, lineText: '' };
-  rsBuildPopover(null, null, '');
-  rsPositionPopover(e.clientX, e.clientY);
-  rsShowPopover();
+  openFabPopover();
+  const _pageLabel = document.getElementById('rnp-page-label');
+  if (_pageLabel) _pageLabel.textContent = 'Page ' + rsScriptLabel(rsCurrentPage, rsCurrentHalf);
+  const _linePreview = document.getElementById('rnp-line-preview');
+  if (_linePreview) _linePreview.style.display = 'none';
+  const _textInput = document.getElementById('rnp-text');
+  if (_textInput) _textInput.value = '';
   rsDrawStart = null;
 }
 
@@ -1269,7 +1446,8 @@ let fabSelectedCharIdx = 0;
 let fabSelectedType = 'skp';
 
 function openFabPopover() {
-  if (!state.runSession) return;
+  // Feature 1: Allow opening even without active run session if from zone
+  if (!state.runSession && !rsPendingNote) return;
   fabSelectedCharIdx = rsActiveCharIdx;
   fabSelectedType = rsActiveNoteType;
 
@@ -1278,8 +1456,12 @@ function openFabPopover() {
 
   const pageLabel = document.getElementById('rnp-page-label');
   if (pageLabel) {
-    const curPdfPage = state.runSession.currentPage || 1;
-    pageLabel.textContent = 'Page ' + rsScriptLabel(curPdfPage);
+    if (rsPendingNote && rsPendingNote.page) {
+      pageLabel.textContent = 'Page ' + rsScriptLabel(rsPendingNote.page, rsPendingNote.half);
+    } else {
+      const curPdfPage = state.runSession?.currentPage || 1;
+      pageLabel.textContent = 'Page ' + rsScriptLabel(curPdfPage);
+    }
   }
 
   const charsEl = document.getElementById('rnp-chars');
@@ -1309,8 +1491,14 @@ function openFabPopover() {
     }));
   }
 
-  const textInput = document.getElementById('rnp-text');
-  if (textInput) textInput.value = '';
+  const linePreview = document.getElementById('rnp-line-preview');
+  if (!rsPendingNote) {
+    // Opened from FAB button (no zone context) — clear both fields
+    const textInput = document.getElementById('rnp-text');
+    if (textInput) textInput.value = '';
+    if (linePreview) linePreview.style.display = 'none';
+  }
+  // If rsPendingNote exists, rsOpenPopover already set line preview and cleared note input
 
   pop.style.display = 'flex';
   pop.style.flexDirection = 'column';
@@ -1320,37 +1508,100 @@ function openFabPopover() {
 function closeFabPopover() {
   const pop = document.getElementById('run-note-popover');
   if (pop) pop.style.display = 'none';
+  const linePreview = document.getElementById('rnp-line-preview');
+  if (linePreview) linePreview.style.display = 'none';
+  rsPendingNote = null;
 }
 
 async function confirmFabNote() {
-  if (!state.runSession) { closeFabPopover(); return; }
+  if (!state.runSession && !rsPendingNote) { closeFabPopover(); return; }
   const fc = rsFlatChars[fabSelectedCharIdx];
   if (!fc) { toast('Select a cast member', 'error'); return; }
   const textInput = document.getElementById('rnp-text');
   const freeText = textInput ? textInput.value.trim() : '';
   const pid = state.activeProduction.id;
-
-  // Security: sessions readable by all production members; lineNotes unchanged
+  // Feature 1+2: If from zone tap, use rsPendingNote context; save noteBody separately
+  const fromZone = rsPendingNote && rsPendingNote.zoneIdx !== undefined && rsPendingNote.zoneIdx !== null;
   await addDoc(collection(db, 'productions', pid, 'lineNotes'), {
     uid: state.currentUser.uid,
     castId: fc.castId,
     characterName: fc.name,
     charColor: fc.color,
     type: fabSelectedType,
-    page: state.runSession.currentPage,
-    half: '',
-    zoneIdx: null,
-    bounds: null,
-    lineText: freeText,
+    page: fromZone ? rsPendingNote.page : (state.runSession?.currentPage || rsCurrentPage),
+    half: fromZone ? (rsPendingNote.half || '') : '',
+    zoneIdx: fromZone ? rsPendingNote.zoneIdx : null,
+    bounds: fromZone ? rsPendingNote.bounds : null,
+    lineText: fromZone ? (rsPendingNote.lineText || '') : '', // Feature 2: zone text
+    noteBody: freeText,  // Feature 2: SM's typed note
     productionId: pid,
-    sessionId: state.runSession.sessionId,
+    sessionId: state.runSession?.sessionId || null,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
   rsActiveCharIdx = fabSelectedCharIdx;
   rsActiveNoteType = fabSelectedType;
   toast('Note added');
+  if (fromZone) rsPendingNote = null; // Feature 1
   closeFabPopover();
+}
+
+
+
+/* ═══════════════════════════════════════════════════════════
+   FEATURE 7: PER-ACTOR EMAIL NOTES
+   ═══════════════════════════════════════════════════════════ */
+function rsOpenEmailNotes() {
+  if (rsNotes.length === 0) { toast('No notes to email'); return; }
+  const emailModal = document.getElementById('rs-email-notes-modal');
+  if (!emailModal) return;
+  emailModal.classList.add('open');
+  const cast = getCastMembers();
+  const byCastId = {};
+  rsNotes.forEach(n => {
+    const castId = n.castId || n.charId;
+    if (!byCastId[castId]) {
+      const member = cast.find(m => m.id === castId);
+      byCastId[castId] = { actorName: member?.name || n.characterName || n.charName || '?', actorEmail: member?.email || '', color: member?.color || n.charColor || '#888', notes: [] };
+    }
+    byCastId[castId].notes.push(n);
+  });
+  const show = state.activeProduction?.title || '';
+  const dateStr = new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  const subject = 'Line Notes — ' + show + ' — ' + dateStr;
+  const totalNotes = rsNotes.length;
+  const actorCount = Object.keys(byCastId).length;
+  const NOTE_TYPE_LABELS = { skp: 'SKIP', para: 'PARAPHRASE', line: 'LINE', add: 'ADDITION', gen: 'GENERAL' };
+  const actorRows = Object.entries(byCastId).filter(([, d]) => d.notes.length > 0).map(([cid, data]) => {
+    const sorted = [...data.notes].sort((a, b) => a.page !== b.page ? a.page - b.page : (a.bounds?.y || 0) - (b.bounds?.y || 0));
+    const noteCount = sorted.length;
+    const hasEmail = !!data.actorEmail;
+    let body = 'Hi ' + data.actorName + ',\n\nHere are your line notes from ' + show + ' on ' + dateStr + ':\n';
+    sorted.forEach(n => {
+      const typeLabel = NOTE_TYPE_LABELS[n.type] || n.type.toUpperCase();
+      const lineText = (n.lineText || '').slice(0, 150) + ((n.lineText || '').length > 150 ? '...' : '');
+      body += '\n---------\np.' + rsScriptLabel(n.page, n.half) + ' [' + typeLabel + ']';
+      if (lineText) body += '\nScript line: "' + lineText + '"';
+      if (n.noteBody && n.noteBody.trim()) body += '\nNote: ' + n.noteBody.trim();
+    });
+    body += '\n---------\n\n' + noteCount + ' note' + (noteCount !== 1 ? 's' : '') + ' total.\n\n\u2014 ' + show + ' Stage Management';
+    const mailtoBody = body.length > 1800 ? body.slice(0, 1800) + '\n\n[Note: Some notes may be truncated. Use the Copy button for the full list.]' : body;
+    const mailtoUri = 'mailto:' + encodeURIComponent(data.actorEmail) + '?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(mailtoBody);
+    const emailDisplay = hasEmail ? '<span class="actor-email">' + escapeHtml(data.actorEmail) + '</span>' : '<span class="actor-email actor-email--warn">No email \u2014 update in Cast &amp; Crew tab</span>';
+    return '<div class="email-actor-row" data-castid="' + escapeHtml(cid) + '"><div class="actor-dot" style="background:' + escapeHtml(data.color) + '"></div><div class="actor-info"><span class="actor-name">' + escapeHtml(data.actorName) + '</span>' + emailDisplay + '</div><span class="actor-note-count">' + noteCount + ' note' + (noteCount !== 1 ? 's' : '') + '</span><button class="modal-btn-primary email-open-btn ' + (hasEmail ? '' : 'email-open-btn--disabled') + '" data-mailto="' + escapeHtml(mailtoUri) + '">Open Email</button><button class="modal-btn-cancel email-copy-btn" data-body="' + escapeHtml(body) + '">Copy</button></div>';
+  }).join('');
+  emailModal.innerHTML = '<div class="send-notes-card"><h3>Email Notes</h3><div class="email-notes-meta">' + escapeHtml(dateStr) + ' \u00b7 ' + totalNotes + ' notes \u00b7 ' + actorCount + ' actors</div>' + actorRows + '<div class="send-notes-actions"><button class="modal-btn-cancel" id="rs-email-notes-close">Close</button></div></div>';
+  emailModal.querySelector('#rs-email-notes-close').addEventListener('click', () => emailModal.classList.remove('open'));
+  emailModal.addEventListener('click', e => { if (e.target === emailModal) emailModal.classList.remove('open'); });
+  emailModal.querySelectorAll('.email-open-btn:not(.email-open-btn--disabled)').forEach(btn => {
+    btn.addEventListener('click', () => { window.open(btn.dataset.mailto, '_blank'); });
+  });
+  emailModal.querySelectorAll('.email-copy-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(btn.dataset.body); toast('Copied to clipboard'); }
+      catch(e) { const ta = document.createElement('textarea'); ta.value = btn.dataset.body; ta.style.cssText = 'position:fixed;left:-9999px;'; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); toast('Select and copy manually'); }
+    });
+  });
 }
 
 // Keyboard in FAB popover
@@ -1416,6 +1667,12 @@ function openPreRunModal() {
     backdrop.remove();
     try {
       await startRunSession(title, pages, duration, warnPgs);
+      // Feature 3: track session ID, clear notes, re-subscribe
+      rsLastSessionId = state.runSession.sessionId;
+      rsNotes = [];
+      renderRunShowSidebar();
+      if (rsPdfDoc) rsRedrawOverlay(rsCurrentPage);
+      rsSubscribeToNotes();
       // Show FAB
       const fab = document.getElementById('run-show-fab');
       if (fab) fab.classList.remove('hidden');
@@ -1456,6 +1713,8 @@ function openEndRunModal() {
     const sid = state.runSession?.sessionId;
     backdrop.remove();
     try {
+      // Feature 3: Preserve last session ID
+      rsLastSessionId = sid;
       await endRunSession(scratchText);
       // Hide FAB
       const fab = document.getElementById('run-show-fab');
@@ -1723,7 +1982,7 @@ function rsOpenSendNotes() {
     const sorted = [...data.notes].sort((a, b) => a.page - b.page || (a.bounds?.y || 0) - (b.bounds?.y || 0));
     const rows = sorted.map(n => {
       const charLabel = n.characterName || n.charName || '';
-      return `<div class="send-note-row" style="border-left-color:${escapeHtml(data.color)}"><strong>p.${rsScriptLabel(n.page, n.half)}</strong>${charLabel ? ` [${escapeHtml(charLabel)}]` : ''} [${escapeHtml(n.type)}] <em>${escapeHtml((n.lineText || '').slice(0, 100))}</em></div>`;
+      return `<div class="send-note-row" style="border-left-color:${escapeHtml(data.color)}"><strong>p.${rsScriptLabel(n.page, n.half)}</strong>${charLabel ? ` [${escapeHtml(charLabel)}]` : ''} [${escapeHtml(n.type)}] <em>${escapeHtml((n.lineText || '').slice(0, 100))}</em>${n.noteBody ? `<div style="color:#c8a96e;font-size:11px;margin-top:2px;"><strong>Note:</strong> ${escapeHtml(n.noteBody)}</div>` : ''}</div>`;
     }).join('');
     return `<div class="send-char-section"><div class="send-char-header"><div style="width:10px;height:10px;border-radius:50%;background:${escapeHtml(data.color)};display:inline-block;"></div><span class="char-name">${escapeHtml(data.actorName)}</span>${data.actorEmail ? `<span style="font-size:11px;color:#5c5850;font-family:'DM Mono',monospace;margin-left:8px;">${escapeHtml(data.actorEmail)}</span>` : ''}</div>${rows}</div>`;
   }).join('');
@@ -1742,7 +2001,7 @@ function rsOpenSendNotes() {
       html += `<section class="s"><div class="sh"><span class="sd" style="background:${escapeHtml(data.color)}"></span><div style="flex:1"><div class="sn">${escapeHtml(data.actorName)}</div>${data.actorEmail ? `<div class="se">${escapeHtml(data.actorEmail)}</div>` : ''}</div></div>`;
       sorted.forEach(n => {
         const charLabel = n.characterName || n.charName || '';
-        html += `<div class="nr"><div class="np" style="background:${escapeHtml(data.color)}">${escapeHtml(n.type)}</div><div class="nd"><div><span class="pg">p.${rsScriptLabel(n.page, n.half)}</span>${charLabel ? `<span style="font-size:11px;color:#aaa;margin-right:6px;">[${escapeHtml(charLabel)}]</span>` : ''}<span class="tl">${NOTE_TYPES_MAP[n.type] || n.type}</span></div>${n.lineText ? `<div class="lt">\u201c${escapeHtml(n.lineText)}\u201d</div>` : ''}</div></div>`;
+        html += `<div class="nr"><div class="np" style="background:${escapeHtml(data.color)}">${escapeHtml(n.type)}</div><div class="nd"><div><span class="pg">p.${rsScriptLabel(n.page, n.half)}</span>${charLabel ? `<span style="font-size:11px;color:#aaa;margin-right:6px;">[${escapeHtml(charLabel)}]</span>` : ''}<span class="tl">${NOTE_TYPES_MAP[n.type] || n.type}</span></div>${n.lineText ? `<div class="lt">\u201c${escapeHtml(n.lineText)}\u201d</div>` : ''}${n.noteBody ? `<div style="font-size:13px;color:#555;margin-top:4px;"><strong>Note:</strong> ${escapeHtml(n.noteBody)}</div>` : ''}</div></div>`;
       });
       html += '</section>';
     });

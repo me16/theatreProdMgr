@@ -861,6 +861,46 @@
     /* Toast warn type */
     .toast--warn { background:#5a3500; border:1px solid #d4af37; color:#d4af37; }
 
+    /* ===== FEATURE 5: Line Notes Sub-tabs ===== */
+    .ln-subtabs { display:flex; border-bottom:1px solid #2e2c29; padding:0 12px; background:#0f0e0c; flex-shrink:0; }
+    .ln-subtab { height:36px; padding:0 18px; background:none; border:none; border-bottom:2px solid transparent; color:#5c5850; font-size:12px; font-weight:500; cursor:pointer; transition:all 0.2s; }
+    .ln-subtab:hover { color:#9a9488; }
+    .ln-subtab--active { color:#c8a96e; border-bottom-color:#c8a96e; }
+
+    /* ===== FEATURE 5: Cue type badges ===== */
+    .cue-type-badge { display:inline-block; padding:2px 8px; border-radius:10px; font-family:"DM Mono",monospace; font-size:10px; font-weight:500; }
+    .cue-type-badge--LX { background:#1A2E50; color:#5B9BD4; }
+    .cue-type-badge--SQ { background:#2D1A14; color:#E63946; }
+    .cue-type-badge--PX { background:#1A2A1A; color:#2D8A4E; }
+    .cue-type-badge--FLY, .cue-type-badge--CARP, .cue-type-badge--OTHER { background:#2E2C29; color:#9A9488; }
+
+    /* ===== FEATURE 5: Cue banner in Run Show ===== */
+    .rs-cue-banner { display:flex; gap:6px; flex-wrap:wrap; padding:6px 12px; background:#0f0e0c; border-bottom:1px solid #2e2c29; min-height:0; }
+    .rs-cue-banner:empty { display:none; }
+    .rs-cue-pill { padding:2px 10px; border-radius:12px; font-family:"DM Mono",monospace; font-size:11px; font-weight:500; cursor:pointer; }
+    .rs-cue-pill--LX { background:#1A2E50; color:#5B9BD4; }
+    .rs-cue-pill--SQ { background:#2D1A14; color:#E63946; }
+    .rs-cue-pill--PX { background:#1A2A1A; color:#2D8A4E; }
+    .rs-cue-pill--FLY, .rs-cue-pill--CARP, .rs-cue-pill--OTHER { background:#2E2C29; color:#9A9488; }
+
+    /* ===== FEATURE 4: Diagram panel ===== */
+    .diagram-panel { width:220px; min-width:220px; border-right:1px solid #2e2c29; background:#141312; display:flex; flex-direction:column; overflow-y:auto; transition:width 0.2s; }
+    .diagram-panel.collapsed { width:24px; min-width:24px; overflow:hidden; }
+    .diagram-panel img { width:100%; height:auto; border-radius:4px; margin-bottom:8px; }
+    .diagram-toggle-btn { width:100%; background:none; border:none; color:#5c5850; cursor:pointer; padding:6px 0; font-size:16px; }
+
+    /* ===== FEATURE 7: Email Notes modal ===== */
+    .email-actor-row { display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid #2e2c29; }
+    .email-actor-row:last-of-type { border-bottom:none; }
+    .actor-dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
+    .actor-info { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
+    .actor-name { font-size:14px; font-weight:600; color:#e8e4dc; }
+    .actor-email { font-family:"DM Mono",monospace; font-size:11px; color:#5c5850; }
+    .actor-email--warn { color:#c8a96e; }
+    .actor-note-count { font-family:"DM Mono",monospace; font-size:11px; color:#5c5850; flex-shrink:0; }
+    .email-notes-meta { font-family:"DM Mono",monospace; font-size:11px; color:#5c5850; margin-bottom:16px; }
+    .email-open-btn--disabled { opacity:0.35; cursor:not-allowed; pointer-events:none; }
+
     /* ===== UTILITY ===== */
     .sr-only {
       position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
@@ -1024,7 +1064,7 @@
     <div class="app-tabbar">
       <button class="app-tab app-tab--active" data-tab="runshow">Run Show</button>
       <button class="app-tab" data-tab="props">Props</button>
-      <button class="app-tab" data-tab="linenotes">Line Notes</button>
+      <button class="app-tab" data-tab="linenotes">Edit Script</button>
       <button class="app-tab" data-tab="cast">Cast &amp; Crew</button>
       <button class="app-tab" data-tab="settings">Settings</button>
     </div>
@@ -1038,7 +1078,10 @@
             <div class="rs-sidebar-header">
               <span class="ln-logo">CUE</span>
               <span class="show-name" id="rs-show-name"></span>
-              <button class="ln-header-btn" id="rs-send-btn" style="margin-left:auto;">Send Notes</button>
+              <div style="margin-left:auto;display:flex;gap:6px;">
+                <button class="ln-header-btn" id="rs-email-notes-btn">Email Notes</button>
+                <button class="ln-header-btn" id="rs-send-btn">Send Notes</button>
+              </div>
             </div>
             <div class="ln-sidebar-section">
               <h5>Cast</h5>
@@ -1054,6 +1097,12 @@
             </div>
           </div>
 
+          <!-- Diagram panel (Feature 4) -->
+          <div class="diagram-panel collapsed" id="rs-diagram-panel">
+            <button class="diagram-toggle-btn" id="rs-diagram-toggle">»</button>
+            <div id="rs-diagram-images" style="padding:8px;"></div>
+          </div>
+
           <!-- CENTER: Script PDF, hit overlay, popover, FAB -->
           <div class="rs-script-area" id="rs-script-area">
             <!-- Page nav header -->
@@ -1067,6 +1116,9 @@
               <span id="rs-script-offset-badge" style="display:none;font-family:'DM Mono',monospace;font-size:10px;color:#c8a96e;border:1px solid #c8a96e44;border-radius:3px;padding:2px 6px;margin-left:2px;" title="Script page offset active"></span>
               <button class="ln-header-btn" id="rs-split-btn">2-up</button>
             </div>
+
+          <!-- Cue banner (Feature 5) -->
+            <div id="rs-cue-banner" class="rs-cue-banner"></div>
 
           <!-- Script drop zone / upload (shown only for owners with no script) -->
             <div id="rs-drop-zone" style="display:none;flex:1;flex-direction:column;align-items:center;justify-content:center;gap:20px;width:100%;min-height:0;padding:24px;">
@@ -1111,7 +1163,8 @@
           <div class="rnp-page-label" id="rnp-page-label">Page 1</div>
           <div id="rnp-chars" class="popover-chars"></div>
           <div id="rnp-types" class="popover-types"></div>
-          <input type="text" id="rnp-text" class="form-input" placeholder="Optional note text&#x2026;" maxlength="200" style="margin:6px 8px 0;width:calc(100% - 16px);" />
+          <div id="rnp-line-preview" style="display:none;margin:6px 8px 0;padding:6px 10px;width:calc(100% - 16px);background:#232220;border:1px solid #2e2c29;border-radius:4px;font-size:11px;color:#9a9488;font-style:italic;max-height:48px;overflow-y:auto;box-sizing:border-box;line-height:1.4;"></div>
+          <input type="text" id="rnp-text" class="form-input" placeholder="Add a note…" maxlength="500" style="margin:6px 8px 0;width:calc(100% - 16px);" />
           <div class="modal-btns" style="padding:8px;">
             <button class="modal-btn-cancel" id="rnp-cancel">Cancel</button>
             <button class="modal-btn-primary" id="rnp-confirm">Add Note</button>
@@ -1125,6 +1178,7 @@
         <div class="popover-section-label" id="rs-pop-cast-label">Cast</div>
         <div id="rs-pop-chars" class="popover-chars"></div>
         <div id="rs-pop-types" class="popover-types"></div>
+        <textarea id="rs-pop-note-text" class="form-input" placeholder="Optional note…" maxlength="500" rows="2" style="margin:6px 8px 0;width:calc(100% - 16px);min-height:40px;resize:vertical;font-size:12px;"></textarea>
         <div class="popover-btns">
           <button class="popover-btn popover-btn--cancel" id="rs-pop-cancel-btn">Cancel</button>
           <button class="popover-btn popover-btn--confirm" id="rs-pop-confirm-btn">Add Note &#x21b5;</button>
@@ -1149,6 +1203,9 @@
       <!-- Send notes modal for Run Show -->
       <div class="send-notes-modal" id="rs-send-notes-modal"></div>
 
+      <!-- Email notes modal (Feature 7) -->
+      <div class="send-notes-modal" id="rs-email-notes-modal"></div>
+
       <!-- PROPS TAB -->
       <div class="tab-panel" id="tab-props">
         <div class="props-subtabs" id="props-subtabs">
@@ -1158,8 +1215,12 @@
         </div>
         <div class="props-content" id="props-content"></div>
       </div>
-      <!-- LINE NOTES TAB (Zones only — Notes view moved to Run Show) -->
+      <!-- EDIT SCRIPT TAB (renamed from Line Notes — Features 4+5) -->
       <div class="tab-panel" id="tab-linenotes">
+        <div class="ln-subtabs" id="ln-subtabs">
+          <button class="ln-subtab ln-subtab--active" data-lntab="zones">Line Notes</button>
+          <button class="ln-subtab" data-lntab="cues">Cues &amp; Diagrams</button>
+        </div>
     <div class="ln-header">
       <span class="ln-logo">CUE</span>
       <span class="show-name" id="ln-show-name"></span>
@@ -1178,6 +1239,9 @@
     </div>
 
     <div class="ln-body">
+      <!-- Cues & Diagrams panel (Feature 5) -->
+      <div id="ln-cues-panel" style="flex:1;overflow-y:auto;padding:24px;display:none;"></div>
+
       <!-- ZONE EDITOR AREA (the only view in Line Notes now) -->
       <div id="ln-zone-editor-area" style="flex:1;overflow:hidden;display:flex;flex-direction:row;">
         <div id="ze-canvas-panel" style="flex:1;overflow:auto;background:#2a2825;display:flex;flex-direction:column;align-items:center;padding:24px 24px 48px;">

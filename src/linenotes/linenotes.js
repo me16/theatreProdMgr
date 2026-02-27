@@ -2,12 +2,12 @@ import { db, storage } from '../firebase.js';
 import { state } from '../shared/state.js';
 import { isOwner } from '../shared/roles.js';
 import { toast } from '../shared/toast.js';
-import { escapeHtml, sanitizeName, genId, confirmDialog } from '../shared/ui.js';
+import { escapeHtml, sanitizeName, genId, confirmDialog, downloadCSV } from '../shared/ui.js';
 import {
   collection, doc, addDoc, updateDoc, deleteDoc, onSnapshot, getDoc, setDoc,
   serverTimestamp, query, where
 } from 'firebase/firestore';
-import { ref, getDownloadURL } from 'firebase/storage';
+import { ref, getDownloadURL, uploadBytesResumable } from 'firebase/storage';
 import { getCastMembers } from '../cast/cast.js';
 
 /*
@@ -38,6 +38,15 @@ let currentPage = 1;
 let currentHalf = 'L';
 let zoneSaveTimeout = null;
 let lnInitialized = false;
+
+// Feature 5: Script cues state
+let scriptCues = [];
+let scriptCuesUnsub = null;
+let activeLnSubtab = 'zones';
+
+// Feature 4: Diagrams state
+let diagrams = [];
+let diagramsUnsub = null;
 
 // Script page offset.
 // scriptPageStartPage: which PDF page number is the first script page (1-indexed).
@@ -153,6 +162,28 @@ function pk()                   { return pageZoneKey(currentPage, currentHalf); 
    INIT
    ═══════════════════════════════════════════════════════════ */
 export function initLineNotes() {
+  // Feature 5: Sub-tab switching
+  document.getElementById('ln-subtabs')?.addEventListener('click', e => {
+    const btn = e.target.closest('.ln-subtab');
+    if (!btn) return;
+    const tab = btn.dataset.lntab;
+    activeLnSubtab = tab;
+    document.querySelectorAll('.ln-subtab').forEach(b => b.classList.toggle('ln-subtab--active', b.dataset.lntab === tab));
+    const lnHeader = document.querySelector('#tab-linenotes .ln-header');
+    const zeArea = document.getElementById('ln-zone-editor-area');
+    const cuesPanel = document.getElementById('ln-cues-panel');
+    if (tab === 'zones') {
+      if (lnHeader) lnHeader.style.display = '';
+      if (zeArea) zeArea.style.display = 'flex';
+      if (cuesPanel) cuesPanel.style.display = 'none';
+    } else {
+      if (lnHeader) lnHeader.style.display = 'none';
+      if (zeArea) zeArea.style.display = 'none';
+      if (cuesPanel) cuesPanel.style.display = 'block';
+      renderCuesPanel();
+    }
+  });
+
   // Zone editor: rubber band + drag on zone-edit-overlay
   const zeOvl = document.getElementById('ze-edit-overlay');
   zeOvl?.addEventListener('mousedown', zeOverlayMouseDown);
@@ -185,6 +216,8 @@ export async function onLineNotesTabActivated() {
     document.getElementById('ln-show-name').textContent =
       state.activeProduction?.title || '';
     loadScript();
+    subscribeToScriptCues();  // Feature 5
+    subscribeToDiagrams();    // Feature 4
   }
   // The Line Notes tab now opens directly to the zones view
   switchToZonesView();
@@ -224,6 +257,10 @@ export function resetLineNotes() {
 function switchToZonesView() {
   const zoneArea = document.getElementById('ln-zone-editor-area');
   if (zoneArea) zoneArea.style.display = 'flex';
+  const cuesPanel = document.getElementById('ln-cues-panel');
+  if (cuesPanel) cuesPanel.style.display = 'none';
+  // Reset sub-tab highlight
+  document.querySelectorAll('.ln-subtab').forEach(b => b.classList.toggle('ln-subtab--active', b.dataset.lntab === 'zones'));
   updatePageStartBadge();
   if (pdfDoc) renderZoneEditorPage(currentPage);
 }
@@ -1069,3 +1106,190 @@ document.addEventListener('keydown', e => {
     return;
   }
 });
+
+/* ═══════════════════════════════════════════════════════════
+   FEATURE 5: SCRIPT CUES
+   ═══════════════════════════════════════════════════════════ */
+function subscribeToScriptCues() {
+  if (scriptCuesUnsub) scriptCuesUnsub();
+  const pid = state.activeProduction?.id;
+  if (!pid) return;
+  scriptCuesUnsub = onSnapshot(collection(db, 'productions', pid, 'scriptCues'), snap => {
+    scriptCues = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    scriptCues.sort((a, b) => (a.page || 0) - (b.page || 0));
+    if (activeLnSubtab === 'cues') renderCuesPanel();
+  });
+  state.unsubscribers.push(() => { if (scriptCuesUnsub) { scriptCuesUnsub(); scriptCuesUnsub = null; } });
+}
+
+export function getScriptCues() { return scriptCues; }
+
+function renderCuesPanel() {
+  const panel = document.getElementById('ln-cues-panel');
+  if (!panel) return;
+  const owner = isOwner();
+  const CUE_TYPES = ['LX', 'SQ', 'PX', 'FLY', 'CARP', 'OTHER'];
+  const CUE_COLORS = { LX: { bg: '#1A2E50', text: '#5B9BD4' }, SQ: { bg: '#2D1A14', text: '#E63946' }, PX: { bg: '#1A2A1A', text: '#2D8A4E' }, FLY: { bg: '#2E2C29', text: '#9A9488' }, CARP: { bg: '#2E2C29', text: '#9A9488' }, OTHER: { bg: '#2E2C29', text: '#9A9488' } };
+  const cueRows = scriptCues.map(c => {
+    return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #2e2c29;"><span style="font-family:\'DM Mono\',monospace;font-size:11px;color:#5c5850;min-width:40px;">p.' + c.page + '</span><span class="cue-type-badge cue-type-badge--' + escapeHtml(c.type) + '">' + escapeHtml(c.type) + '</span><span style="flex:1;font-size:13px;color:#e8e4dc;">' + escapeHtml(c.label || '') + '</span>' + (owner ? '<button class="panel-btn cue-edit-btn" data-id="' + escapeHtml(c.id) + '">Edit</button><button class="panel-btn panel-btn--danger cue-delete-btn" data-id="' + escapeHtml(c.id) + '">Delete</button>' : '') + '</div>';
+  }).join('') || '<div style="color:#5c5850;font-size:13px;padding:12px 0;">No cues added yet.</div>';
+  panel.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;"><h3 style="font-family:\'Instrument Serif\',serif;font-size:20px;color:#c8a96e;">Script Cues</h3><div style="display:flex;gap:6px;">' + (owner ? '<button class="settings-btn" id="ln-cue-import-btn">Import JSON</button>' : '') + '<button class="settings-btn" id="ln-cue-export-btn">Export CSV</button></div></div><div id="ln-cue-list">' + cueRows + '</div>' + (owner ? '<div style="margin-top:24px;padding:20px;background:#1a1916;border:1px solid #2e2c29;border-radius:10px;"><h4 style="font-size:14px;color:#c8a96e;margin-bottom:12px;" id="cue-form-title">Add Cue</h4><div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;"><input class="form-input" id="cue-page-input" type="number" min="1" placeholder="Page" style="width:70px;" /><select class="form-select" id="cue-type-select">' + CUE_TYPES.map(t => '<option value="' + t + '">' + t + '</option>').join('') + '</select><input class="form-input" id="cue-label-input" type="text" maxlength="100" placeholder="Label (e.g. LX 42)" style="flex:1;min-width:150px;" /></div><div style="display:flex;gap:8px;"><button class="modal-btn-primary" id="cue-save-btn">Add Cue</button><button class="modal-btn-cancel" id="cue-cancel-btn" style="display:none;">Cancel</button></div><input type="hidden" id="cue-edit-id" value="" /></div>' : '') + '<div style="margin-top:32px;"><h3 style="font-family:\'Instrument Serif\',serif;font-size:20px;color:#c8a96e;margin-bottom:12px;">Diagrams</h3>' + (owner ? '<button class="settings-btn settings-btn--primary" id="ln-diagrams-btn">Manage Diagrams</button>' : '') + '<div id="ln-diagrams-list" style="margin-top:12px;"></div></div>';
+  if (owner) {
+    panel.querySelector('#cue-save-btn')?.addEventListener('click', saveCue);
+    panel.querySelector('#cue-cancel-btn')?.addEventListener('click', cancelCueEdit);
+    panel.querySelectorAll('.cue-edit-btn').forEach(btn => btn.addEventListener('click', () => startCueEdit(btn.dataset.id)));
+    panel.querySelectorAll('.cue-delete-btn').forEach(btn => btn.addEventListener('click', () => deleteCue(btn.dataset.id)));
+    panel.querySelector('#ln-cue-import-btn')?.addEventListener('click', importCuesJSON);
+    panel.querySelector('#ln-diagrams-btn')?.addEventListener('click', openDiagramsManager);
+  }
+  panel.querySelector('#ln-cue-export-btn')?.addEventListener('click', exportCuesCSV);
+}
+
+async function saveCue() {
+  if (!isOwner()) return;
+  const page = parseInt(document.getElementById('cue-page-input')?.value);
+  const type = document.getElementById('cue-type-select')?.value || 'OTHER';
+  const label = sanitizeName(document.getElementById('cue-label-input')?.value || '');
+  const editId = document.getElementById('cue-edit-id')?.value || '';
+  if (!page || page < 1) { toast('Valid page number required.', 'error'); return; }
+  if (!label) { toast('Label is required.', 'error'); return; }
+  const pid = state.activeProduction.id;
+  const cueData = { page, half: '', type, label, zoneIdx: null, bounds: null, createdAt: serverTimestamp() };
+  try {
+    if (editId) { await updateDoc(doc(db, 'productions', pid, 'scriptCues', editId), cueData); toast('Cue updated.', 'success'); }
+    else { await addDoc(collection(db, 'productions', pid, 'scriptCues'), cueData); toast('Cue added!', 'success'); }
+    document.getElementById('cue-page-input').value = '';
+    document.getElementById('cue-label-input').value = '';
+    document.getElementById('cue-edit-id').value = '';
+    document.getElementById('cue-form-title').textContent = 'Add Cue';
+    document.getElementById('cue-save-btn').textContent = 'Add Cue';
+    document.getElementById('cue-cancel-btn').style.display = 'none';
+  } catch(e) { toast('Failed to save cue.', 'error'); }
+}
+
+function startCueEdit(cueId) {
+  const cue = scriptCues.find(c => c.id === cueId); if (!cue) return;
+  document.getElementById('cue-page-input').value = cue.page || '';
+  document.getElementById('cue-type-select').value = cue.type || 'OTHER';
+  document.getElementById('cue-label-input').value = cue.label || '';
+  document.getElementById('cue-edit-id').value = cueId;
+  document.getElementById('cue-form-title').textContent = 'Edit Cue';
+  document.getElementById('cue-save-btn').textContent = 'Update Cue';
+  document.getElementById('cue-cancel-btn').style.display = '';
+}
+function cancelCueEdit() {
+  document.getElementById('cue-page-input').value = '';
+  document.getElementById('cue-label-input').value = '';
+  document.getElementById('cue-edit-id').value = '';
+  document.getElementById('cue-form-title').textContent = 'Add Cue';
+  document.getElementById('cue-save-btn').textContent = 'Add Cue';
+  document.getElementById('cue-cancel-btn').style.display = 'none';
+}
+async function deleteCue(cueId) {
+  if (!isOwner()) return;
+  if (!confirmDialog('Delete this cue?')) return;
+  try { await deleteDoc(doc(db, 'productions', state.activeProduction.id, 'scriptCues', cueId)); toast('Cue deleted.', 'success'); }
+  catch(e) { toast('Failed to delete cue.', 'error'); }
+}
+
+/* Feature 6: Export/Import cues */
+function exportCuesCSV() {
+  if (scriptCues.length === 0) { toast('No cues to export.', 'warn'); return; }
+  const rows = [['page', 'half', 'type', 'label', 'zoneIdx']];
+  scriptCues.forEach(c => { rows.push([c.page, c.half || '', c.type, c.label || '', c.zoneIdx ?? '']); });
+  const title = (state.activeProduction?.title || 'production').replace(/[^a-zA-Z0-9]/g, '_');
+  downloadCSV(rows, 'cues_' + title + '_' + new Date().toISOString().split('T')[0] + '.csv');
+  toast('Cues exported.', 'success');
+}
+function importCuesJSON() {
+  if (!isOwner()) return;
+  const VALID_TYPES = ['LX', 'SQ', 'PX', 'FLY', 'CARP', 'OTHER'];
+  const input = document.createElement('input'); input.type = 'file'; input.accept = '.json';
+  input.addEventListener('change', async () => {
+    const file = input.files[0]; if (!file) return;
+    try {
+      const data = JSON.parse(await file.text());
+      if (!Array.isArray(data)) { toast('JSON must be an array of cues.', 'error'); return; }
+      for (let i = 0; i < data.length; i++) {
+        if (!Number.isInteger(data[i].page) || data[i].page < 1) { toast('Item ' + (i+1) + ': page must be a positive integer.', 'error'); return; }
+        if (!VALID_TYPES.includes(data[i].type)) { toast('Item ' + (i+1) + ': invalid type.', 'error'); return; }
+        if (!data[i].label || !data[i].label.trim()) { toast('Item ' + (i+1) + ': label required.', 'error'); return; }
+      }
+      if (!confirmDialog('Found ' + data.length + ' cues. Import will ADD to existing cues. Continue?')) return;
+      const pid = state.activeProduction.id;
+      for (const c of data) { await addDoc(collection(db, 'productions', pid, 'scriptCues'), { page: c.page, half: c.half || '', type: c.type, label: sanitizeName(c.label), zoneIdx: c.zoneIdx ?? null, bounds: null, createdAt: serverTimestamp() }); }
+      toast('Imported ' + data.length + ' cues.', 'success');
+    } catch(e) { toast('Invalid JSON: ' + e.message, 'error'); }
+  });
+  input.click();
+}
+
+/* ═══════════════════════════════════════════════════════════
+   FEATURE 4: DIAGRAMS
+   ═══════════════════════════════════════════════════════════ */
+function subscribeToDiagrams() {
+  if (diagramsUnsub) diagramsUnsub();
+  const pid = state.activeProduction?.id; if (!pid) return;
+  diagramsUnsub = onSnapshot(collection(db, 'productions', pid, 'diagrams'), snap => {
+    diagrams = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    diagrams.sort((a, b) => (a.page || 0) - (b.page || 0));
+    if (activeLnSubtab === 'cues') renderCuesPanel();
+  });
+  state.unsubscribers.push(() => { if (diagramsUnsub) { diagramsUnsub(); diagramsUnsub = null; } });
+}
+export function getDiagrams() { return diagrams; }
+
+function openDiagramsManager() {
+  let modal = document.getElementById('ln-diagrams-modal');
+  if (!modal) { modal = document.createElement('div'); modal.id = 'ln-diagrams-modal'; modal.className = 'send-notes-modal'; document.body.appendChild(modal); }
+  modal.classList.add('open');
+  renderDiagramsModal(modal);
+}
+
+function renderDiagramsModal(modal) {
+  const owner = isOwner();
+  const pid = state.activeProduction.id;
+  const list = diagrams.map(d => '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #2e2c29;"><img src="' + escapeHtml(d.url) + '" style="width:60px;height:40px;object-fit:cover;border-radius:4px;" /><span style="flex:1;font-size:13px;color:#e8e4dc;">' + escapeHtml(d.label || 'Untitled') + '</span><span style="font-family:\'DM Mono\',monospace;font-size:11px;color:#5c5850;">p.' + d.page + '</span>' + (owner ? '<button class="panel-btn panel-btn--danger diagram-delete-btn" data-id="' + escapeHtml(d.id) + '" data-path="' + escapeHtml(d.storagePath || '') + '">Delete</button>' : '') + '</div>').join('') || '<div style="color:#5c5850;font-size:13px;padding:12px 0;">No diagrams uploaded.</div>';
+  modal.innerHTML = '<div class="send-notes-card" style="width:600px;"><h3 style="font-family:\'Instrument Serif\',serif;font-size:20px;color:#c8a96e;margin-bottom:16px;">Diagrams Manager</h3>' + list + (owner ? '<div style="margin-top:16px;padding:16px;background:#232220;border-radius:8px;"><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;"><input type="file" id="diagram-file-input" accept="image/*" style="font-size:12px;color:#9a9488;" /><input class="form-input" id="diagram-page-input" type="number" min="1" placeholder="Page" style="width:70px;" /><input class="form-input" id="diagram-label-input" type="text" maxlength="100" placeholder="Label (optional)" style="flex:1;min-width:120px;" /></div><button class="modal-btn-primary" id="diagram-upload-btn">Upload</button><div id="diagram-upload-progress" style="display:none;margin-top:8px;"><div style="width:100%;height:4px;background:#2e2c29;border-radius:2px;overflow:hidden;"><div id="diagram-upload-bar" style="height:100%;background:#c8a96e;width:0%;transition:width 0.3s;"></div></div></div></div>' : '') + '<div class="send-notes-actions" style="margin-top:16px;"><button class="modal-btn-cancel" id="diagrams-modal-close">Close</button></div></div>';
+  modal.querySelector('#diagrams-modal-close').addEventListener('click', () => modal.classList.remove('open'));
+  modal.addEventListener('click', e => { if (e.target === modal) modal.classList.remove('open'); });
+  if (owner) {
+    modal.querySelector('#diagram-upload-btn')?.addEventListener('click', async () => {
+      const file = modal.querySelector('#diagram-file-input')?.files[0];
+      const page = parseInt(modal.querySelector('#diagram-page-input')?.value);
+      const label = (modal.querySelector('#diagram-label-input')?.value || '').trim();
+      if (!file) { toast('Select an image file.', 'error'); return; }
+      if (!page || page < 1) { toast('Valid page number required.', 'error'); return; }
+      const ext = file.name.split('.').pop() || 'png';
+      const storagePath = 'diagrams/' + pid + '/' + genId() + '.' + ext;
+      const storageRef = ref(storage, storagePath);
+      const progressDiv = modal.querySelector('#diagram-upload-progress');
+      const bar = modal.querySelector('#diagram-upload-bar');
+      if (progressDiv) progressDiv.style.display = 'block';
+      try {
+        const metadata = { contentType: file.type };
+        const task = uploadBytesResumable(storageRef, file, metadata);
+        await new Promise((resolve, reject) => {
+          task.on('state_changed', snap => { if (bar) bar.style.width = Math.round((snap.bytesTransferred / snap.totalBytes) * 100) + '%'; }, reject, async () => {
+            const url = await getDownloadURL(storageRef);
+            await addDoc(collection(db, 'productions', pid, 'diagrams'), { page, url, storagePath, label, createdAt: serverTimestamp() });
+            resolve();
+          });
+        });
+        toast('Diagram uploaded!', 'success');
+        renderDiagramsModal(modal);
+      } catch(e) { toast('Upload failed: ' + e.message, 'error'); if (progressDiv) progressDiv.style.display = 'none'; }
+    });
+    modal.querySelectorAll('.diagram-delete-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!confirmDialog('Delete this diagram?')) return;
+        try {
+          const sp = btn.dataset.path;
+          if (sp) { const { deleteObject } = await import('firebase/storage'); await deleteObject(ref(storage, sp)).catch(() => {}); }
+          await deleteDoc(doc(db, 'productions', pid, 'diagrams', btn.dataset.id));
+          toast('Diagram deleted.', 'success'); renderDiagramsModal(modal);
+        } catch(e) { toast('Failed to delete.', 'error'); }
+      });
+    });
+  }
+}

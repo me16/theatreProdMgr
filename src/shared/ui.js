@@ -27,3 +27,12 @@ export function hideOverlay(id) {
 export function confirmDialog(msg) {
   return window.confirm(msg);
 }
+
+/* ─── Feature 6: CSV download utility ─── */
+export function downloadCSV(rows, filename) {
+  const csv = rows.map(r => r.map(c => JSON.stringify(c ?? "")).join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: filename });
+  a.click();
+  URL.revokeObjectURL(a.href);
+}

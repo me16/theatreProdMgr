@@ -93,13 +93,31 @@ export function getPropStatus(prop, page) {
   let status = 'Off Stage';
   let activeCue = null;
   let upcomingEnter = null;
+  let crossover = null; // { from, to, mover, cueIndex } when next enter differs from current location
   if (cues.length > 0) {
     for (const cue of cues) {
       if (page >= cue.enterPage && page <= cue.exitPage) { status = 'ON'; location = 'ON'; activeCue = cue; break; }
       else if (page > cue.exitPage) { location = cue.exitLocation || 'SL'; status = 'Off Stage'; }
     }
     if (status !== 'ON') {
-      for (const cue of cues) { if (cue.enterPage > page) { upcomingEnter = cue.enterPage; break; } }
+      for (let i = 0; i < cues.length; i++) {
+        const cue = cues[i];
+        if (cue.enterPage > page) {
+          upcomingEnter = cue.enterPage;
+          // Determine where the prop currently sits
+          const currentLoc = location; // already computed above
+          const enterLoc = cue.enterLocation || currentLoc; // default: same side
+          if (enterLoc !== currentLoc) {
+            crossover = {
+              from: currentLoc,
+              to: enterLoc,
+              mover: cue.mover || '',
+              cueIndex: i,
+            };
+          }
+          break;
+        }
+      }
     }
   } else {
     const enters = prop.enters || []; const exits = prop.exits || [];
@@ -109,7 +127,7 @@ export function getPropStatus(prop, page) {
     }
     if (status !== 'ON') { for (const ep of enters) { if (ep > page) { upcomingEnter = ep; break; } } }
   }
-  return { location, status, activeCue, upcomingEnter };
+  return { location, status, activeCue, upcomingEnter, crossover };
 }
 
 /* ─────────────────────────────────────────────────
@@ -216,9 +234,20 @@ function renderManageTab() {
   if (cueRows.length === 0) {
     cueRowsHtml = '<div style="color:#555;font-size:13px;padding:8px 0;">No cues yet. Add at least one.</div>';
   } else {
-    cueRowsHtml = cueRows.map((c, i) => `
+    cueRowsHtml = cueRows.map((c, i) => {
+      // Determine the "expected" enter side: previous cue's exitLocation, or prop start for first cue
+      const prevLoc = i === 0
+        ? (editProp?.start || content.querySelector('#prop-start-select')?.value || 'SL')
+        : (cueRows[i - 1].exitLocation || 'SL');
+      const enterLoc = c.enterLocation || prevLoc;
+      const needsCrossover = enterLoc !== prevLoc;
+      return `
       <div class="cue-row" data-idx="${i}">
         <span class="cue-num">#${i + 1}</span>
+        <select class="form-select cue-enter-loc" title="Enter from">
+          <option value="SL" ${enterLoc === 'SL' ? 'selected' : ''}>SL</option>
+          <option value="SR" ${enterLoc === 'SR' ? 'selected' : ''}>SR</option>
+        </select>
         <input class="form-input cue-enter" type="number" min="1" placeholder="Enter pg" value="${c.enterPage || ''}" />
         <span class="arrow">\u2192</span>
         <input class="form-input cue-exit" type="number" min="1" placeholder="Exit pg" value="${c.exitPage || ''}" />
@@ -228,8 +257,10 @@ function renderManageTab() {
         </select>
         <input class="form-input carrier-input cue-con" type="text" maxlength="100" placeholder="Carrier On" value="${escapeHtml(c.carrierOn || '')}" />
         <input class="form-input carrier-input cue-coff" type="text" maxlength="100" placeholder="Carrier Off" value="${escapeHtml(c.carrierOff || '')}" />
+        ${needsCrossover ? `<input class="form-input carrier-input cue-mover" type="text" maxlength="100" placeholder="Moved by…" value="${escapeHtml(c.mover || '')}" />` : ''}
         <button class="remove-cue-btn" data-idx="${i}" title="Remove cue">\u00d7</button>
-      </div>`).join('');
+        ${needsCrossover ? `<div class="cue-crossover-alert" title="Prop must be moved from ${prevLoc} → ${enterLoc}">⚠ Cross ${prevLoc}→${enterLoc}</div>` : ''}
+      </div>`}).join('');
   }
 
   let tableRows = '';
@@ -278,19 +309,25 @@ function renderManageTab() {
 
   content.querySelector('#add-cue-btn').addEventListener('click', () => {
     syncCueRowsFromDOM();
-    cueRows.push({ enterPage: '', exitPage: '', exitLocation: 'SL', carrierOn: '', carrierOff: '', carrierOnCastId: '', carrierOffCastId: '' });
+    cueRows.push({ enterPage: '', exitPage: '', enterLocation: '', exitLocation: 'SL', carrierOn: '', carrierOff: '', carrierOnCastId: '', carrierOffCastId: '', mover: '', moverCastId: '' });
     renderContent();
   });
 
   content.querySelectorAll('.cue-row').forEach((row, i) => {
     const conInput = row.querySelector('.cue-con');
     const coffInput = row.querySelector('.cue-coff');
+    const moverInput = row.querySelector('.cue-mover');
     buildCastPicker(conInput, (sel) => {
       if (cueRows[i]) { cueRows[i].carrierOn = sel ? sel.castName : ''; cueRows[i].carrierOnCastId = sel ? (sel.castId || '') : ''; }
     }, cueRows[i]?.carrierOn || '');
     buildCastPicker(coffInput, (sel) => {
       if (cueRows[i]) { cueRows[i].carrierOff = sel ? sel.castName : ''; cueRows[i].carrierOffCastId = sel ? (sel.castId || '') : ''; }
     }, cueRows[i]?.carrierOff || '');
+    if (moverInput) {
+      buildCastPicker(moverInput, (sel) => {
+        if (cueRows[i]) { cueRows[i].mover = sel ? sel.castName : ''; cueRows[i].moverCastId = sel ? (sel.castId || '') : ''; }
+      }, cueRows[i]?.mover || '');
+    }
   });
   content.querySelector('#save-prop-btn').addEventListener('click', saveProp);
   content.querySelector('#cancel-edit-btn')?.addEventListener('click', () => { editingPropId = null; cueRows = []; renderContent(); });
@@ -311,6 +348,10 @@ function syncCueRowsFromDOM() {
       cueRows[i].enterPage = row.querySelector('.cue-enter').value;
       cueRows[i].exitPage = row.querySelector('.cue-exit').value;
       cueRows[i].exitLocation = row.querySelector('.cue-loc').value;
+      const enterLocSelect = row.querySelector('.cue-enter-loc');
+      if (enterLocSelect) cueRows[i].enterLocation = enterLocSelect.value;
+      const moverInput = row.querySelector('.cue-mover');
+      if (moverInput) cueRows[i].mover = moverInput.value;
     }
   });
 }
@@ -322,15 +363,23 @@ async function saveProp() {
   const start = content.querySelector('#prop-start-select').value;
   if (!name) { toast('Prop name is required.', 'error'); return; }
   if (cueRows.length === 0) { toast('Add at least one cue.', 'error'); return; }
-  const cues = cueRows.map(c => ({
-    enterPage: parseInt(c.enterPage) || 0,
-    exitPage: parseInt(c.exitPage) || 0,
-    exitLocation: c.exitLocation || 'SL',
-    carrierOn: sanitizeName(c.carrierOn),
-    carrierOnCastId: c.carrierOnCastId || '',
-    carrierOff: sanitizeName(c.carrierOff),
-    carrierOffCastId: c.carrierOffCastId || '',
-  }));
+  const cues = cueRows.map((c, i) => {
+    // Determine expected enter location: previous exit or prop start
+    const prevLoc = i === 0 ? start : (cueRows[i - 1].exitLocation || 'SL');
+    const enterLoc = c.enterLocation || prevLoc;
+    return {
+      enterPage: parseInt(c.enterPage) || 0,
+      exitPage: parseInt(c.exitPage) || 0,
+      enterLocation: enterLoc,
+      exitLocation: c.exitLocation || 'SL',
+      carrierOn: sanitizeName(c.carrierOn),
+      carrierOnCastId: c.carrierOnCastId || '',
+      carrierOff: sanitizeName(c.carrierOff),
+      carrierOffCastId: c.carrierOffCastId || '',
+      mover: sanitizeName(c.mover || ''),
+      moverCastId: c.moverCastId || '',
+    };
+  });
   for (let i = 0; i < cues.length; i++) {
     if (!cues[i].enterPage || !cues[i].exitPage) { toast('Cue #' + (i+1) + ': enter and exit pages required.', 'error'); return; }
     if (cues[i].exitPage < cues[i].enterPage) { toast('Cue #' + (i+1) + ': exit must be >= enter.', 'error'); return; }
@@ -359,7 +408,7 @@ function startEdit(propId) {
   cueRows = (prop.cues || []).map(c => ({ ...c }));
   if (cueRows.length === 0 && prop.enters?.length) {
     for (let i = 0; i < prop.enters.length; i++) {
-      cueRows.push({ enterPage: prop.enters[i], exitPage: prop.exits?.[i] || prop.enters[i], exitLocation: prop.endLocation || 'SL', carrierOn: '', carrierOff: '' });
+      cueRows.push({ enterPage: prop.enters[i], exitPage: prop.exits?.[i] || prop.enters[i], enterLocation: '', exitLocation: prop.endLocation || 'SL', carrierOn: '', carrierOff: '', mover: '', moverCastId: '' });
     }
   }
   renderContent(); content.scrollTop = 0;
@@ -391,15 +440,20 @@ function renderViewTab() {
 
   const renderCol = (items) => {
     if (items.length === 0) return '<div style="color:rgba(255,255,255,0.3);font-size:12px;text-align:center;">\u2014</div>';
-    return items.map(({ prop: p, activeCue: ac, warn, upcomingEnter: ue }) => {
+    return items.map(({ prop: p, activeCue: ac, warn, upcomingEnter: ue, crossover: xo }) => {
       let carrier = '';
       if (ac) {
         if (ac.carrierOn) carrier += '<div class="prop-carrier">\u2191 ' + escapeHtml(ac.carrierOn) + '</div>';
         if (ac.carrierOff) carrier += '<div class="prop-carrier">\u2193 ' + escapeHtml(ac.carrierOff) + '</div>';
       }
+      let crossoverHtml = '';
+      if (xo) {
+        const moverLabel = xo.mover ? escapeHtml(xo.mover) : '<em>unassigned</em>';
+        crossoverHtml = '<div class="prop-crossover-alert">\u26a0 Move ' + escapeHtml(xo.from) + '\u2192' + escapeHtml(xo.to) + ' \u00b7 ' + moverLabel + '</div>';
+      }
       const wt = warn ? ' <span style="color:#d4af37;font-size:11px;">(pg ' + ue + ')</span>' : '';
-      return '<div class="stage-prop ' + (warn ? 'stage-prop--warn' : '') + '" data-propname="' + escapeHtml(p.name) + '">' +
-        '<div class="prop-name">' + escapeHtml(p.name) + wt + '</div>' + carrier + '</div>';
+      return '<div class="stage-prop ' + (warn ? 'stage-prop--warn' : '') + (xo ? ' stage-prop--crossover' : '') + '" data-propname="' + escapeHtml(p.name) + '">' +
+        '<div class="prop-name">' + escapeHtml(p.name) + wt + '</div>' + carrier + crossoverHtml + '</div>';
     }).join('');
   };
 
@@ -489,7 +543,11 @@ export function startTimer(pagesOverride, durationOverride) {
           const warnKey = `${p.id}:${r.upcomingEnter}`;
           if (!_warnedProps.has(warnKey)) {
             _warnedProps.add(warnKey);
-            const msg = `\u26a0\ufe0f ${p.name} \u2014 ${pagesAway} pages (pg ${r.upcomingEnter})`;
+            let msg = `\u26a0\ufe0f ${p.name} \u2014 ${pagesAway} pages (pg ${r.upcomingEnter})`;
+            if (r.crossover) {
+              const moverName = r.crossover.mover || 'unassigned';
+              msg += ` \u2022 MOVE ${r.crossover.from}\u2192${r.crossover.to} by ${moverName}`;
+            }
             toast(msg, state.runSession ? 'warn' : 'info');
           }
         }
@@ -621,10 +679,15 @@ function openPropNotesModal(propName) {
   const prop = props.find(p => p.name === propName);
   if (!prop) return;
   const cues = prop.cues || [];
-  const cueSummary = cues.map((c, i) =>
-    'Cue ' + (i+1) + ': pg ' + c.enterPage + '\u2013' + c.exitPage + ' \u2192 ' + escapeHtml(c.exitLocation) +
-    (c.carrierOn ? ' (on: ' + escapeHtml(c.carrierOn) + ')' : '') + (c.carrierOff ? ' (off: ' + escapeHtml(c.carrierOff) + ')' : '')
-  ).join('<br/>') || 'No cues';
+  const cueSummary = cues.map((c, i) => {
+    const enterLoc = c.enterLocation || (i === 0 ? (prop.start || 'SL') : (cues[i-1].exitLocation || 'SL'));
+    const prevLoc = i === 0 ? (prop.start || 'SL') : (cues[i-1].exitLocation || 'SL');
+    const xoTag = enterLoc !== prevLoc
+      ? ' <span style="color:#e63946;">\u26a0 move ' + escapeHtml(prevLoc) + '\u2192' + escapeHtml(enterLoc) + (c.mover ? ' by ' + escapeHtml(c.mover) : '') + '</span>'
+      : '';
+    return 'Cue ' + (i+1) + ': ' + escapeHtml(enterLoc) + ' pg ' + c.enterPage + '\u2013' + c.exitPage + ' \u2192 ' + escapeHtml(c.exitLocation) +
+    (c.carrierOn ? ' (on: ' + escapeHtml(c.carrierOn) + ')' : '') + (c.carrierOff ? ' (off: ' + escapeHtml(c.carrierOff) + ')' : '') + xoTag;
+  }).join('<br/>') || 'No cues';
 
   const existing = document.querySelector('.prop-notes-modal');
   if (existing) existing.remove();
@@ -720,13 +783,13 @@ function exportPropsCSV() {
   if (props.length === 0) { toast('No props to export.', 'warn'); return; }
   const maxCues = Math.max(1, ...props.map(p => (p.cues || []).length));
   const header = ['name', 'start', 'endLocation'];
-  for (let i = 1; i <= maxCues; i++) { header.push('cue_' + i + '_enterPage', 'cue_' + i + '_exitPage', 'cue_' + i + '_exitLocation', 'cue_' + i + '_carrierOn', 'cue_' + i + '_carrierOff'); }
+  for (let i = 1; i <= maxCues; i++) { header.push('cue_' + i + '_enterLocation', 'cue_' + i + '_enterPage', 'cue_' + i + '_exitPage', 'cue_' + i + '_exitLocation', 'cue_' + i + '_carrierOn', 'cue_' + i + '_carrierOff', 'cue_' + i + '_mover'); }
   const rows = [header];
   props.forEach(p => {
     const cues = p.cues || [];
     const endLoc = cues.length > 0 ? cues[cues.length - 1].exitLocation : (p.endLocation || p.start);
     const row = [p.name, p.start, endLoc];
-    for (let i = 0; i < maxCues; i++) { const c = cues[i]; if (c) { row.push(c.enterPage, c.exitPage, c.exitLocation || '', c.carrierOn || '', c.carrierOff || ''); } else { row.push('', '', '', '', ''); } }
+    for (let i = 0; i < maxCues; i++) { const c = cues[i]; if (c) { row.push(c.enterLocation || '', c.enterPage, c.exitPage, c.exitLocation || '', c.carrierOn || '', c.carrierOff || '', c.mover || ''); } else { row.push('', '', '', '', '', '', ''); } }
     rows.push(row);
   });
   const title = (state.activeProduction?.title || 'production').replace(/[^a-zA-Z0-9]/g, '_');
@@ -755,7 +818,7 @@ function importPropsJSON() {
       if (!confirmDialog('Found ' + data.length + ' props. Import will ADD to existing props — duplicates not checked. Continue?')) return;
       const pid = state.activeProduction.id;
       for (const p of data) {
-        const cues = p.cues.map(c => ({ enterPage: c.enterPage, exitPage: c.exitPage, exitLocation: c.exitLocation || 'SL', carrierOn: c.carrierOn || '', carrierOnCastId: '', carrierOff: c.carrierOff || '', carrierOffCastId: '' }));
+        const cues = p.cues.map(c => ({ enterPage: c.enterPage, exitPage: c.exitPage, enterLocation: c.enterLocation || '', exitLocation: c.exitLocation || 'SL', carrierOn: c.carrierOn || '', carrierOnCastId: '', carrierOff: c.carrierOff || '', carrierOffCastId: '', mover: c.mover || '', moverCastId: '' }));
         await addDoc(collection(db, 'productions', pid, 'props'), { name: sanitizeName(p.name), start: p.start, cues, enters: cues.map(c => c.enterPage), exits: cues.map(c => c.exitPage), endLocation: cues[cues.length - 1].exitLocation, createdAt: serverTimestamp() });
       }
       toast('Imported ' + data.length + ' props.', 'success');

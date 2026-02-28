@@ -590,14 +590,19 @@ function renderStageColumnsHtml(page) {
 
   const renderCol = (items) => {
     if (items.length === 0) return '<div style="color:rgba(255,255,255,0.3);font-size:12px;text-align:center;">—</div>';
-    return items.map(({ prop: p, activeCue: ac, warn, upcomingEnter: ue }) => {
+    return items.map(({ prop: p, activeCue: ac, warn, upcomingEnter: ue, crossover: xo }) => {
       let carrier = '';
       if (ac) {
         if (ac.carrierOn) carrier += `<div class="prop-carrier">↑ ${escapeHtml(ac.carrierOn)}</div>`;
         if (ac.carrierOff) carrier += `<div class="prop-carrier">↓ ${escapeHtml(ac.carrierOff)}</div>`;
       }
+      let crossoverHtml = '';
+      if (xo) {
+        const moverLabel = xo.mover ? escapeHtml(xo.mover) : '<em>unassigned</em>';
+        crossoverHtml = `<div class="prop-crossover-alert">⚠ Move ${escapeHtml(xo.from)}→${escapeHtml(xo.to)} · ${moverLabel}</div>`;
+      }
       const wt = warn ? ` <span style="color:#d4af37;font-size:11px;">(pg ${ue})</span>` : '';
-      return `<div class="stage-prop ${warn ? 'stage-prop--warn' : ''}"><div class="prop-name">${escapeHtml(p.name)}${wt}</div>${carrier}</div>`;
+      return `<div class="stage-prop ${warn ? 'stage-prop--warn' : ''} ${xo ? 'stage-prop--crossover' : ''}"><div class="prop-name">${escapeHtml(p.name)}${wt}</div>${carrier}${crossoverHtml}</div>`;
     }).join('');
   };
 

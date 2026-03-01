@@ -1,4 +1,4 @@
-import { signInWithEmailAndPassword } from 'firebase/auth';
+import { signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
 import { auth } from '../firebase.js';
 import { toast } from '../shared/toast.js';
 
@@ -29,6 +29,30 @@ export function initLogin() {
   }
 
   btn.addEventListener('click', doLogin);
+
+  // P3: Error auto-dismiss
+  let _errorTimer = null;
+  function showLoginError(msg) {
+    errorEl.textContent = msg;
+    if (_errorTimer) clearTimeout(_errorTimer);
+    _errorTimer = setTimeout(() => { errorEl.textContent = ''; }, 5000);
+  }
+
+  // P3: Clear error on input focus
+  emailInput.addEventListener('focus', () => { errorEl.textContent = ''; });
+  passInput.addEventListener('focus', () => { errorEl.textContent = ''; });
+
+  // P3: Forgot password
+  const forgotLink = document.getElementById('login-forgot-password');
+  if (forgotLink) {
+    forgotLink.addEventListener('click', async (e) => {
+      e.preventDefault();
+      const email = emailInput.value.trim();
+      if (!email) { showLoginError('Enter your email above, then click Forgot Password.'); return; }
+      try { await sendPasswordResetEmail(auth, email); toast('Password reset email sent!', 'success'); }
+      catch (err) { showLoginError('Could not send reset email. Check the address.'); }
+    });
+  }
   passInput.addEventListener('keydown', e => {
     if (e.key === 'Enter') doLogin();
   });

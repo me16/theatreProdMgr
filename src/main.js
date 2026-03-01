@@ -10,6 +10,7 @@ import { initLineNotes, resetLineNotes } from './linenotes/linenotes.js';
 import { initCast } from './cast/cast.js';
 import { initSettings } from './settings/settings.js';
 import { initTabs } from './shared/tabs.js';
+import { initRouter, navigate } from './shared/router.js';
 
 // Initialize all modules
 initLogin();
@@ -20,6 +21,17 @@ initLineNotes();
 initCast();
 initSettings();
 initTabs();
+
+// P2: Initialize router
+initRouter((action, prodId, tab, params) => {
+  if (action === 'dashboard') {
+    import('./dashboard/dashboard.js').then(m => m.showDashboard());
+  } else if (action === 'tab' && prodId && tab) {
+    if (state.activeProduction?.id === prodId) {
+      import('./shared/tabs.js').then(m => m.switchTab(tab));
+    }
+  }
+});
 
 // Auth state listener
 onAuthStateChanged(auth, async (user) => {
@@ -63,6 +75,9 @@ onAuthStateChanged(auth, async (user) => {
   } catch (e) {
     console.warn('Could not write user doc:', e);
   }
+
+  // P2: Set default hash if empty
+  if (!window.location.hash) navigate('#/dashboard');
 
   showDashboard();
 });

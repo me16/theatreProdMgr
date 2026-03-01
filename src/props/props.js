@@ -8,6 +8,9 @@ import {
   serverTimestamp
 } from 'firebase/firestore';
 import { buildCastPicker, getCastMembers, subscribeToCast } from '../cast/cast.js';
+import { syncSessionToFirestore, startSessionSync, stopSessionSync, hideHeartbeat } from '../shared/session-sync.js';
+import { loadCheckState, saveCheckState, checkProgress, renderProgressBar } from '../shared/check-state.js';
+import { updateRouteParams } from '../shared/router.js';
 
 let props = [];
 let propNotes = {};
@@ -17,6 +20,7 @@ let editingPropId = null;
 let cueRows = [];
 let preChecked = {};
 let postChecked = {};
+let _checkStateLoaded = false;
 
 // Module-level timer variables — used ONLY when state.runSession is null
 let _timerRunning = false;
@@ -153,6 +157,7 @@ export function initProps() {
 
 function setActiveTab(tab) {
   activeTab = tab;
+  updateRouteParams({ sub: tab }); // P2: sync sub-tab to URL
   document.querySelectorAll('.props-subtab').forEach(t =>
     t.classList.toggle('props-subtab--active', t.dataset.subtab === tab)
   );
@@ -176,7 +181,7 @@ export function showApp() {
   // Stop any running timer from previous production
   stopTimer();
   props = []; propNotes = {}; currentPage = 1;
-  preChecked = {}; postChecked = {};
+  preChecked = {}; postChecked = {}; _checkStateLoaded = false;
   editingPropId = null; cueRows = [];
   subscribeToProps();
   subscribeToCast();
@@ -232,7 +237,7 @@ function renderManageTab() {
 
   let cueRowsHtml = '';
   if (cueRows.length === 0) {
-    cueRowsHtml = '<div style="color:#555;font-size:13px;padding:8px 0;">No cues yet. Add at least one.</div>';
+    cueRowsHtml = '<div style="color:#555;font-size:13px;padding:8px 0;">No cues added. Prop will stay in its starting location.</div>';
   } else {
     cueRowsHtml = cueRows.map((c, i) => {
       // Determine the "expected" enter side: previous cue's exitLocation, or prop start for first cue
@@ -362,7 +367,7 @@ async function saveProp() {
   const name = sanitizeName(content.querySelector('#prop-name-input').value);
   const start = content.querySelector('#prop-start-select').value;
   if (!name) { toast('Prop name is required.', 'error'); return; }
-  if (cueRows.length === 0) { toast('Add at least one cue.', 'error'); return; }
+  // P3: Zero-cue props allowed — props with no cues appear in starting location
   const cues = cueRows.map((c, i) => {
     // Determine expected enter location: previous exit or prop start
     const prevLoc = i === 0 ? start : (cueRows[i - 1].exitLocation || 'SL');
@@ -385,7 +390,7 @@ async function saveProp() {
     if (cues[i].exitPage < cues[i].enterPage) { toast('Cue #' + (i+1) + ': exit must be >= enter.', 'error'); return; }
   }
   const pid = state.activeProduction.id;
-  const endLocation = cues[cues.length - 1].exitLocation;
+  const endLocation = cues.length > 0 ? cues[cues.length - 1].exitLocation : start;
   const enters = cues.map(c => c.enterPage);
   const exits = cues.map(c => c.exitPage);
   const propData = { name, start, cues, enters, exits, endLocation, createdAt: serverTimestamp() };
@@ -562,6 +567,7 @@ export function startTimer(pagesOverride, durationOverride) {
 
   setTimerField('timerInterval', interval);
   _notifyRunShow();
+  syncSessionToFirestore(); // P0: sync on timer start
 }
 
 export function holdTimer() {
@@ -573,6 +579,7 @@ export function holdTimer() {
   const iv = getTimerState().timerInterval;
   if (iv) { clearInterval(iv); setTimerField('timerInterval', null); }
   _notifyRunShow();
+  syncSessionToFirestore(); // P0
 }
 
 export function stopTimer() {
@@ -583,6 +590,7 @@ export function stopTimer() {
   setTimerField('timerElapsed', 0);
   _warnedProps.clear();
   _notifyRunShow();
+  syncSessionToFirestore(); // P0
 }
 
 // Callback hook — set by runshow.js to trigger its re-render
@@ -619,6 +627,13 @@ export async function startRunSession(sessionTitle, totalPages, durationMin, war
     scratchpadNotes: '',
     status: 'active',
     reportHtml: '',
+    liveElapsedSeconds: 0,
+    liveCurrentPage: 1,
+    liveHoldLog: [],
+    liveScratchpad: '',
+    liveTimerRunning: false,
+    liveTimerHeld: false,
+    lastSyncTimestamp: serverTimestamp(),
     noteCount: 0,
     notesByActor: {},
   });
@@ -643,6 +658,8 @@ export async function startRunSession(sessionTitle, totalPages, durationMin, war
   // 3. Start the timer immediately
   startTimer(totalPages, durationMin);
 }
+  // P0: Start periodic Firestore sync
+  startSessionSync();
 
 /**
  * End the active run session.
@@ -652,6 +669,11 @@ export async function endRunSession(scratchpadText) {
   if (!state.runSession) return;
 
   stopTimer();
+
+  // P0: Stop sync and write final state
+  stopSessionSync();
+  await syncSessionToFirestore();
+  hideHeartbeat();
 
   const sid = state.runSession.sessionId;
   const pid = state.activeProduction.id;
@@ -726,7 +748,15 @@ function openPropNotesModal(propName) {
 }
 
 /* ======================== PRE/POST CHECK TAB ======================== */
-function renderCheckTab() {
+async function renderCheckTab() {
+  // P0: Load persisted check state from Firestore (only on first render)
+  if (!_checkStateLoaded) {
+    const _saved = await loadCheckState();
+    preChecked = _saved.preChecked;
+    postChecked = _saved.postChecked;
+    _checkStateLoaded = true;
+  }
+
   const renderCheckGrid = (type, checked) => {
     const items = props.map(p => {
       const isPreShow = type === 'pre';
@@ -756,7 +786,10 @@ function renderCheckTab() {
       </div>`;
   };
 
-  content.innerHTML = renderCheckGrid('pre', preChecked) + renderCheckGrid('post', postChecked);
+  // P0: Progress bars
+  const _preProg = checkProgress(preChecked, props.length);
+  const _postProg = checkProgress(postChecked, props.length);
+  content.innerHTML = renderProgressBar('Pre-Show', _preProg) + renderProgressBar('Post-Show', _postProg) + renderCheckGrid('pre', preChecked) + renderCheckGrid('post', postChecked);
 
   content.querySelectorAll('.check-card').forEach(card => {
     card.addEventListener('click', () => {
@@ -764,6 +797,7 @@ function renderCheckTab() {
       const type = card.dataset.type;
       if (type === 'pre') preChecked[name] = !preChecked[name];
       else postChecked[name] = !postChecked[name];
+      saveCheckState(preChecked, postChecked); // P0: persist
       renderContent();
     });
   });
@@ -771,6 +805,7 @@ function renderCheckTab() {
     btn.addEventListener('click', () => {
       if (btn.dataset.type === 'pre') preChecked = {};
       else postChecked = {};
+      saveCheckState(preChecked, postChecked); // P0: persist
       renderContent();
     });
   });
@@ -809,7 +844,7 @@ function importPropsJSON() {
         const p = data[i];
         if (!p.name || typeof p.name !== 'string') { toast('Item ' + (i+1) + ': name is required.', 'error'); return; }
         if (!['SL', 'SR'].includes(p.start)) { toast('Item ' + (i+1) + ': start must be SL or SR.', 'error'); return; }
-        if (!Array.isArray(p.cues) || p.cues.length === 0) { toast('Item ' + (i+1) + ': at least one cue required.', 'error'); return; }
+        if (p.cues && !Array.isArray(p.cues)) { toast('Item ' + (i+1) + ': cues must be an array.', 'error'); return; }
         for (let j = 0; j < p.cues.length; j++) {
           if (!Number.isInteger(p.cues[j].enterPage) || p.cues[j].enterPage < 1) { toast('Item ' + (i+1) + ', Cue ' + (j+1) + ': enterPage must be a positive integer.', 'error'); return; }
           if (!Number.isInteger(p.cues[j].exitPage) || p.cues[j].exitPage < 1) { toast('Item ' + (i+1) + ', Cue ' + (j+1) + ': exitPage must be a positive integer.', 'error'); return; }
@@ -818,8 +853,8 @@ function importPropsJSON() {
       if (!confirmDialog('Found ' + data.length + ' props. Import will ADD to existing props — duplicates not checked. Continue?')) return;
       const pid = state.activeProduction.id;
       for (const p of data) {
-        const cues = p.cues.map(c => ({ enterPage: c.enterPage, exitPage: c.exitPage, enterLocation: c.enterLocation || '', exitLocation: c.exitLocation || 'SL', carrierOn: c.carrierOn || '', carrierOnCastId: '', carrierOff: c.carrierOff || '', carrierOffCastId: '', mover: c.mover || '', moverCastId: '' }));
-        await addDoc(collection(db, 'productions', pid, 'props'), { name: sanitizeName(p.name), start: p.start, cues, enters: cues.map(c => c.enterPage), exits: cues.map(c => c.exitPage), endLocation: cues[cues.length - 1].exitLocation, createdAt: serverTimestamp() });
+        const cues = (p.cues || []).map(c => ({ enterPage: c.enterPage, exitPage: c.exitPage, enterLocation: c.enterLocation || '', exitLocation: c.exitLocation || 'SL', carrierOn: c.carrierOn || '', carrierOnCastId: '', carrierOff: c.carrierOff || '', carrierOffCastId: '', mover: c.mover || '', moverCastId: '' }));
+        await addDoc(collection(db, 'productions', pid, 'props'), { name: sanitizeName(p.name), start: p.start, cues, enters: cues.map(c => c.enterPage), exits: cues.map(c => c.exitPage), endLocation: cues.length > 0 ? cues[cues.length - 1].exitLocation : p.start, createdAt: serverTimestamp() });
       }
       toast('Imported ' + data.length + ' props.', 'success');
     } catch(e) { toast('Invalid JSON: ' + e.message, 'error'); }

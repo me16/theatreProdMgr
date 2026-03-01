@@ -28,6 +28,7 @@ import {
   getPropStatus, getProps, startTimer, holdTimer, stopTimer,
   startRunSession, endRunSession, setRunShowNotifyCallback,
 } from '../props/props.js';
+import { detectActiveSession, showRecoveryDialog, hydrateSessionFromFirestore, abandonSession, startSessionSync, syncSessionToFirestore } from '../shared/session-sync.js';
 // Zone extraction is self-contained in runshow.js — no linenotes imports needed for rendering
 // Script page label helpers are defined locally below (rsScriptLabel / rsScriptOffset).
 

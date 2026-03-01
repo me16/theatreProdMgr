@@ -74,6 +74,10 @@ service cloud.firestore {
         allow read: if isMember(productionId) || isSuperAdmin();
         allow create, update, delete: if isOwner(productionId) || isSuperAdmin();
       }
+      // P0: Pre/Post Check state persistence — per-user document
+      match /checkState/{uid} {
+        allow read, write: if request.auth.uid == uid && isMember(productionId);
+      }
     }
   }
 }

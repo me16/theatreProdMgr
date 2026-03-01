@@ -1,9 +1,13 @@
 import { auth } from '../firebase.js';
+import { state } from './state.js';
 import { onLineNotesTabActivated } from '../linenotes/linenotes.js';
 import { renderCastTab } from '../cast/cast.js';
 import { renderSettingsTab } from '../settings/settings.js';
 import { onRunShowTabActivated } from '../RunShow/Runshow.js';
 import { onPropsTabActivated } from '../props/props.js';
+import { setRoute } from './router.js';
+
+const TAB_ROUTE_MAP = { runshow:'runshow', props:'props', linenotes:'script', cast:'cast', settings:'settings' };
 
 let activeTab = 'runshow';
 
@@ -11,7 +15,12 @@ export function initTabs() {
   document.querySelectorAll('.app-tab').forEach(btn => {
     btn.addEventListener('click', () => {
       const tabId = btn.dataset.tab;
-      if (tabId) switchTab(tabId);
+      if (tabId) {
+        // P2: Update hash via router
+        const pid = state.activeProduction?.id;
+        if (pid) setRoute(pid, TAB_ROUTE_MAP[tabId] || tabId);
+        switchTab(tabId);
+      }
     });
   });
 

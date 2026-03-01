@@ -12,6 +12,7 @@ import { showApp, hideApp } from '../props/props.js';
 import { resetLineNotes } from '../linenotes/linenotes.js';
 import { resetRunShow } from '../RunShow/Runshow.js';
 import { isOwner } from '../shared/roles.js';
+import { setRoute, navigateToDashboard } from '../shared/router.js';
 
 const dashView = document.getElementById('dashboard-view');
 const grid = document.getElementById('productions-grid');
@@ -46,16 +47,21 @@ async function loadProductions() {
     const memberSnaps = await getDocs(
       query(collectionGroup(db, 'members'), where('email', '==', state.currentUser.email))
     );
-    const myDocs = memberSnaps.docs.filter(d => d.id === uid);
-    if (myDocs.length > 0) {
-      await renderProductionCards({ docs: myDocs, empty: false });
+    // Deduplicate by production ID — collectionGroup can return multiple
+    // member docs for the same production (UID match + email match).
+    const seen = new Set();
+    const uniqueDocs = [];
+    // Prefer docs where id === uid (canonical), then fall back to others
+    const sorted = [...memberSnaps.docs].sort((a, b) => (b.id === uid ? 1 : 0) - (a.id === uid ? 1 : 0));
+    for (const d of sorted) {
+      const prodId = d.ref.parent.parent.id;
+      if (!seen.has(prodId)) { seen.add(prodId); uniqueDocs.push(d); }
+    }
+    if (uniqueDocs.length > 0) {
+      await renderProductionCards({ docs: uniqueDocs, empty: false });
       return;
     }
-    if (!memberSnaps.empty) {
-      await renderProductionCards(memberSnaps);
-      return;
-    }
-    grid.innerHTML = '<div class="empty-state">No productions yet. Create one or join with a code.</div>';
+    grid.innerHTML = '<div class="empty-state"><div class="empty-state-icon">🎭</div><div class="empty-state-headline">No productions yet</div><div class="empty-state-subtext">Create your first production or join an existing one with a join code.</div></div>';
   } catch (e) {
     console.error('Failed to load productions:', e);
     grid.innerHTML = '<div class="empty-state">Could not load productions. Check the browser console for details.</div>';

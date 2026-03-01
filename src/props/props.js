@@ -1,4 +1,4 @@
-import { db, auth } from '../firebase.js';
+import { db, auth, storage } from '../firebase.js';
 import { state } from '../shared/state.js';
 import { isOwner } from '../shared/roles.js';
 import { toast } from '../shared/toast.js';
@@ -7,6 +7,7 @@ import {
   collection, doc, addDoc, updateDoc, deleteDoc, onSnapshot,
   serverTimestamp
 } from 'firebase/firestore';
+import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
 import { buildCastPicker, getCastMembers, subscribeToCast } from '../cast/cast.js';
 import { syncSessionToFirestore, startSessionSync, stopSessionSync, hideHeartbeat } from '../shared/session-sync.js';
 import { loadCheckState, saveCheckState, checkProgress, renderProgressBar } from '../shared/check-state.js';
@@ -18,6 +19,7 @@ let currentPage = 1;
 let activeTab = 'manage';
 let editingPropId = null;
 let cueRows = [];
+let _pendingPropPhoto = null; // { file, previewUrl } when user selects a new photo
 let preChecked = {};
 let postChecked = {};
 let _checkStateLoaded = false;
@@ -270,7 +272,7 @@ function renderManageTab() {
 
   let tableRows = '';
   if (props.length === 0) {
-    tableRows = '<tr><td colspan="5" style="color:#555;text-align:center;padding:24px;">No props added yet.</td></tr>';
+    tableRows = '<tr><td colspan="6" style="color:#555;text-align:center;padding:24px;">No props added yet.</td></tr>';
   } else {
     tableRows = props.map(p => {
       const cues = p.cues || [];
@@ -278,7 +280,10 @@ function renderManageTab() {
       const cueTags = cues.map(c =>
         '<span class="cue-tag cue-tag--enter">\u2191' + c.enterPage + '</span><span class="cue-tag cue-tag--exit">\u2193' + c.exitPage + '</span>'
       ).join(' ') || '<span style="color:#555;">\u2014</span>';
-      return '<tr><td>' + escapeHtml(p.name) + '</td><td>' + escapeHtml(p.start) + '</td><td>' + cueTags + '</td><td>' + escapeHtml(endLoc) + '</td><td>' +
+      const thumbHtml = p.photoUrl
+        ? '<img class="prop-thumb" src="' + escapeHtml(p.photoUrl) + '" data-src="' + escapeHtml(p.photoUrl) + '" alt="" title="Click to enlarge" />'
+        : '<span style="color:#555;font-size:18px;">📦</span>';
+      return '<tr><td style="width:52px;text-align:center;">' + thumbHtml + '</td><td>' + escapeHtml(p.name) + '</td><td>' + escapeHtml(p.start) + '</td><td>' + cueTags + '</td><td>' + escapeHtml(endLoc) + '</td><td>' +
         '<button class="panel-btn edit-prop-btn" data-id="' + escapeHtml(p.id) + '">Edit</button> ' +
         '<button class="panel-btn panel-btn--danger delete-prop-btn" data-id="' + escapeHtml(p.id) + '">Delete</button></td></tr>';
     }).join('');
@@ -299,6 +304,14 @@ function renderManageTab() {
           <option value="SR" ${editProp?.start === 'SR' ? 'selected' : ''}>Stage Right</option>
         </select>
       </div>
+      <div class="form-row" style="flex-direction:column;align-items:flex-start;">
+        <label style="min-width:unset;">Prop Photo <span style="color:#555;font-size:11px;">(optional)</span></label>
+        <div class="prop-photo-upload-row">
+          <input type="file" id="prop-photo-input" accept="image/*" style="font-size:12px;color:#aaa;background:#0f0f1e;border:1px solid #2a2a3e;border-radius:4px;padding:4px 6px;" />
+          ${editProp?.photoUrl ? `<img class="prop-photo-preview" id="prop-photo-preview" src="${escapeHtml(editProp.photoUrl)}" title="Click to enlarge" />` : '<span id="prop-photo-preview-placeholder" style="font-size:12px;color:#555;">No photo yet.</span>'}
+          ${editProp?.photoUrl ? '<button class="prop-photo-clear-btn" id="prop-photo-clear-btn">✕ Remove</button>' : ''}
+        </div>
+      </div>
       <h4 style="font-size:14px;color:#888;margin:16px 0 8px;">Cues</h4>
       <div class="cue-rows" id="cue-rows-container">${cueRowsHtml}</div>
       <button class="add-cue-btn" id="add-cue-btn">+ Add Cue</button>
@@ -308,9 +321,57 @@ function renderManageTab() {
       </div>
     </div>
     <div class="props-table-wrap"><table class="props-table">
-      <thead><tr><th>Name</th><th>Start</th><th>Cues</th><th>End</th><th></th></tr></thead>
+      <thead><tr><th>Photo</th><th>Name</th><th>Start</th><th>Cues</th><th>End</th><th></th></tr></thead>
       <tbody>${tableRows}</tbody>
     </table></div>`;
+
+  // Photo upload input wiring
+  const photoInput = content.querySelector('#prop-photo-input');
+  if (photoInput) {
+    photoInput.addEventListener('change', () => {
+      const file = photoInput.files[0];
+      if (!file) return;
+      if (file.size > 8 * 1024 * 1024) { toast('Photo must be under 8 MB.', 'error'); photoInput.value = ''; return; }
+      const url = URL.createObjectURL(file);
+      _pendingPropPhoto = { file, previewUrl: url };
+      let preview = content.querySelector('#prop-photo-preview');
+      const placeholder = content.querySelector('#prop-photo-preview-placeholder');
+      if (!preview) {
+        preview = document.createElement('img');
+        preview.id = 'prop-photo-preview';
+        preview.className = 'prop-photo-preview';
+        if (placeholder) placeholder.replaceWith(preview);
+        else content.querySelector('.prop-photo-upload-row').appendChild(preview);
+      }
+      preview.src = url;
+      preview.title = 'Click to enlarge';
+    });
+  }
+  const photoClearBtn = content.querySelector('#prop-photo-clear-btn');
+  if (photoClearBtn) {
+    photoClearBtn.addEventListener('click', () => {
+      _pendingPropPhoto = { file: null, previewUrl: null, clear: true };
+      const row = content.querySelector('.prop-photo-upload-row');
+      if (row) {
+        const preview = row.querySelector('#prop-photo-preview');
+        if (preview) preview.remove();
+        const clearBtn = row.querySelector('#prop-photo-clear-btn');
+        if (clearBtn) clearBtn.remove();
+        let ph = row.querySelector('#prop-photo-preview-placeholder');
+        if (!ph) {
+          ph = document.createElement('span');
+          ph.id = 'prop-photo-preview-placeholder';
+          ph.style.cssText = 'font-size:12px;color:#555;';
+          ph.textContent = 'No photo yet.';
+          row.appendChild(ph);
+        }
+      }
+    });
+  }
+  const photoPreview = content.querySelector('#prop-photo-preview');
+  if (photoPreview) {
+    photoPreview.addEventListener('click', () => openPhotoLightbox(photoPreview.src));
+  }
 
   content.querySelector('#add-cue-btn').addEventListener('click', () => {
     syncCueRowsFromDOM();
@@ -335,12 +396,13 @@ function renderManageTab() {
     }
   });
   content.querySelector('#save-prop-btn').addEventListener('click', saveProp);
-  content.querySelector('#cancel-edit-btn')?.addEventListener('click', () => { editingPropId = null; cueRows = []; renderContent(); });
+  content.querySelector('#cancel-edit-btn')?.addEventListener('click', () => { editingPropId = null; cueRows = []; _pendingPropPhoto = null; renderContent(); });
   content.querySelectorAll('.remove-cue-btn').forEach(btn => {
     btn.addEventListener('click', () => { syncCueRowsFromDOM(); cueRows.splice(parseInt(btn.dataset.idx), 1); renderContent(); });
   });
   content.querySelectorAll('.edit-prop-btn').forEach(btn => btn.addEventListener('click', () => startEdit(btn.dataset.id)));
   content.querySelectorAll('.delete-prop-btn').forEach(btn => btn.addEventListener('click', () => deleteProp(btn.dataset.id)));
+  content.querySelectorAll('.prop-thumb').forEach(img => img.addEventListener('click', e => { e.stopPropagation(); openPhotoLightbox(img.dataset.src); }));
   // Feature 6: Import/Export
   content.querySelector('#props-import-btn')?.addEventListener('click', importPropsJSON);
   content.querySelector('#props-export-btn')?.addEventListener('click', exportPropsCSV);
@@ -393,7 +455,39 @@ async function saveProp() {
   const endLocation = cues.length > 0 ? cues[cues.length - 1].exitLocation : start;
   const enters = cues.map(c => c.enterPage);
   const exits = cues.map(c => c.exitPage);
-  const propData = { name, start, cues, enters, exits, endLocation, createdAt: serverTimestamp() };
+  // Photo upload / clear handling
+  let photoUrl = editingPropId ? (props.find(p => p.id === editingPropId)?.photoUrl || '') : '';
+  let photoStoragePath = editingPropId ? (props.find(p => p.id === editingPropId)?.photoStoragePath || '') : '';
+  if (_pendingPropPhoto?.clear) {
+    if (photoStoragePath) {
+      try { await deleteObject(ref(storage, photoStoragePath)); } catch(_e) { /* ignore */ }
+    }
+    photoUrl = ''; photoStoragePath = '';
+  } else if (_pendingPropPhoto?.file) {
+    const file = _pendingPropPhoto.file;
+    const ext = file.name.split('.').pop() || 'jpg';
+    const storagePath = `props/${pid}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+    const storageRef = ref(storage, storagePath);
+    try {
+      const saveBtn = content.querySelector('#save-prop-btn');
+      if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Uploading…'; }
+      const task = uploadBytesResumable(storageRef, file, { contentType: file.type });
+      await new Promise((resolve, reject) => task.on('state_changed', null, reject, resolve));
+      if (photoStoragePath) {
+        try { await deleteObject(ref(storage, photoStoragePath)); } catch(_e) { /* ignore */ }
+      }
+      photoUrl = await getDownloadURL(storageRef);
+      photoStoragePath = storagePath;
+    } catch(uploadErr) {
+      toast('Photo upload failed: ' + uploadErr.message, 'error');
+      const saveBtn = content.querySelector('#save-prop-btn');
+      if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = editingPropId ? 'Update Prop' : 'Add Prop'; }
+      return;
+    }
+  }
+  _pendingPropPhoto = null;
+
+  const propData = { name, start, cues, enters, exits, endLocation, photoUrl, photoStoragePath, createdAt: serverTimestamp() };
   try {
     if (editingPropId) {
       await updateDoc(doc(db, 'productions', pid, 'props', editingPropId), propData);
@@ -422,10 +516,14 @@ function startEdit(propId) {
 async function deleteProp(propId) {
   if (!isOwner()) return;
   if (!confirmDialog('Delete this prop?')) return;
+  const prop = props.find(p => p.id === propId);
   try {
+    if (prop?.photoStoragePath) {
+      try { await deleteObject(ref(storage, prop.photoStoragePath)); } catch(_e) { /* ignore */ }
+    }
     await deleteDoc(doc(db, 'productions', state.activeProduction.id, 'props', propId));
     toast('Prop deleted.', 'success');
-    if (editingPropId === propId) { editingPropId = null; cueRows = []; }
+    if (editingPropId === propId) { editingPropId = null; cueRows = []; _pendingPropPhoto = null; }
   } catch (e) { toast('Failed to delete prop.', 'error'); }
 }
 
@@ -457,8 +555,9 @@ function renderViewTab() {
         crossoverHtml = '<div class="prop-crossover-alert">\u26a0 Move ' + escapeHtml(xo.from) + '\u2192' + escapeHtml(xo.to) + ' \u00b7 ' + moverLabel + '</div>';
       }
       const wt = warn ? ' <span style="color:#d4af37;font-size:11px;">(pg ' + ue + ')</span>' : '';
+      const pillThumb = p.photoUrl ? '<img class="prop-thumb" style="float:right;margin:0 0 4px 8px;" src="' + escapeHtml(p.photoUrl) + '" data-src="' + escapeHtml(p.photoUrl) + '" alt="" />' : '';
       return '<div class="stage-prop ' + (warn ? 'stage-prop--warn' : '') + (xo ? ' stage-prop--crossover' : '') + '" data-propname="' + escapeHtml(p.name) + '">' +
-        '<div class="prop-name">' + escapeHtml(p.name) + wt + '</div>' + carrier + crossoverHtml + '</div>';
+        pillThumb + '<div class="prop-name">' + escapeHtml(p.name) + wt + '</div>' + carrier + crossoverHtml + '</div>';
     }).join('');
   };
 
@@ -483,6 +582,9 @@ function renderViewTab() {
   });
   content.querySelectorAll('.stage-prop').forEach(el =>
     el.addEventListener('click', () => openPropNotesModal(el.dataset.propname))
+  );
+  content.querySelectorAll('.stage-prop .prop-thumb').forEach(img =>
+    img.addEventListener('click', e => { e.stopPropagation(); openPhotoLightbox(img.dataset.src); })
   );
 }
 
@@ -715,8 +817,10 @@ function openPropNotesModal(propName) {
   if (existing) existing.remove();
   const modal = document.createElement('div');
   modal.className = 'prop-notes-modal';
+  const photoSection = prop.photoUrl ? `<img class="prop-notes-photo" id="prop-notes-photo-img" src="${escapeHtml(prop.photoUrl)}" alt="${escapeHtml(propName)}" title="Click to enlarge" />` : '';
   modal.innerHTML = `<div class="prop-notes-card">
     <h3>${escapeHtml(propName)}</h3>
+    ${photoSection}
     <div class="cue-summary">${cueSummary}</div>
     <textarea id="prop-notes-text" ${canEdit ? '' : 'disabled'} placeholder="Add notes about this prop...">${escapeHtml(note?.notes || '')}</textarea>
     <div class="modal-btns" style="margin-top:12px;">
@@ -726,6 +830,7 @@ function openPropNotesModal(propName) {
   </div>`;
   document.body.appendChild(modal);
   modal.querySelector('#close-prop-notes').addEventListener('click', () => modal.remove());
+  modal.querySelector('#prop-notes-photo-img')?.addEventListener('click', () => openPhotoLightbox(prop.photoUrl));
   modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
   modal.querySelector('#save-prop-notes')?.addEventListener('click', async () => {
     if (!isOwner()) return;
@@ -747,6 +852,18 @@ function openPropNotesModal(propName) {
   });
 }
 
+/* ======================== PHOTO LIGHTBOX ======================== */
+function openPhotoLightbox(url) {
+  if (!url) return;
+  const existing = document.querySelector('.prop-photo-lightbox');
+  if (existing) existing.remove();
+  const lb = document.createElement('div');
+  lb.className = 'prop-photo-lightbox';
+  lb.innerHTML = `<img src="${escapeHtml(url)}" alt="Prop photo" />`;
+  lb.addEventListener('click', () => lb.remove());
+  document.body.appendChild(lb);
+}
+
 /* ======================== PRE/POST CHECK TAB ======================== */
 async function renderCheckTab() {
   // P0: Load persisted check state from Firestore (only on first render)
@@ -764,7 +881,7 @@ async function renderCheckTab() {
       const carrier = isPreShow
         ? ((p.cues || [])[0]?.carrierOn || '')
         : ((p.cues || []).length > 0 ? p.cues[p.cues.length - 1].carrierOff : '');
-      return { name: p.name, loc, carrier };
+      return { name: p.name, loc, carrier, photoUrl: p.photoUrl || '' };
     });
     const total = items.length;
     const done = items.filter(it => checked[it.name]).length;
@@ -778,6 +895,7 @@ async function renderCheckTab() {
         <div class="check-grid">${items.map(it => `
           <div class="check-card ${checked[it.name] ? 'check-card--checked' : ''}" data-name="${escapeHtml(it.name)}" data-type="${type}">
             <span class="check-mark">${checked[it.name] ? '\u2713' : ''}</span>
+            ${it.photoUrl ? `<img class="prop-thumb-check" src="${escapeHtml(it.photoUrl)}" data-src="${escapeHtml(it.photoUrl)}" alt="" />` : ''}
             <div class="check-name">${escapeHtml(it.name)}</div>
             <div class="check-detail">${escapeHtml(it.loc)}${it.carrier ? ' \u00b7 ' + escapeHtml(it.carrier) : ''}</div>
           </div>
@@ -791,6 +909,9 @@ async function renderCheckTab() {
   const _postProg = checkProgress(postChecked, props.length);
   content.innerHTML = renderProgressBar('Pre-Show', _preProg) + renderProgressBar('Post-Show', _postProg) + renderCheckGrid('pre', preChecked) + renderCheckGrid('post', postChecked);
 
+  content.querySelectorAll('.prop-thumb-check').forEach(img => {
+    img.addEventListener('click', e => { e.stopPropagation(); openPhotoLightbox(img.dataset.src); });
+  });
   content.querySelectorAll('.check-card').forEach(card => {
     card.addEventListener('click', () => {
       const name = card.dataset.name;

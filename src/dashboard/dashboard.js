@@ -16,6 +16,7 @@ import { setRoute, navigateToDashboard } from '../shared/router.js';
 
 const dashView = document.getElementById('dashboard-view');
 const grid = document.getElementById('productions-grid');
+let _loadingProductions = false; // prevents concurrent duplicate loads
 
 export function initDashboard() {
   document.getElementById('dash-logout-btn').addEventListener('click', () => {
@@ -38,6 +39,8 @@ export function hideDashboard() {
 }
 
 async function loadProductions() {
+  if (_loadingProductions) return;
+  _loadingProductions = true;
   grid.innerHTML = '';
   const uid = state.currentUser.uid;
 
@@ -65,6 +68,8 @@ async function loadProductions() {
   } catch (e) {
     console.error('Failed to load productions:', e);
     grid.innerHTML = '<div class="empty-state">Could not load productions. Check the browser console for details.</div>';
+  } finally {
+    _loadingProductions = false;
   }
 }
 
@@ -119,6 +124,7 @@ async function renderProductionCards(memberSnaps) {
   if (grid.children.length === 0) {
     grid.innerHTML = '<div class="empty-state">No productions yet. Create one or join with a code.</div>';
   }
+  _loadingProductions = false;
 }
 
 async function openProduction(id, prod, role) {

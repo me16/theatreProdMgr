@@ -1,6 +1,15 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
+    match /props/{productionId}/{fileName} {
+      allow read: if request.auth != null
+        && firestore.exists(/databases/(default)/documents/productions/$(productionId)/members/$(request.auth.uid));
+      allow write: if request.auth != null
+        && firestore.get(/databases/(default)/documents/productions/$(productionId)/members/$(request.auth.uid)).data.role == 'owner'
+        && request.resource.size < 8 * 1024 * 1024;
+      allow delete: if request.auth != null
+        && firestore.get(/databases/(default)/documents/productions/$(productionId)/members/$(request.auth.uid)).data.role == 'owner';
+    }
     match /productions/{productionId}/script.pdf {
       allow read: if request.auth != null
         && firestore.exists(/databases/(default)/documents/productions/$(productionId)/members/$(request.auth.uid));

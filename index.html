@@ -347,6 +347,40 @@
     .stage-prop .prop-name { font-weight: 600; font-size: 14px; }
     .stage-prop .prop-carrier { font-size: 12px; color: rgba(255,255,255,0.5); margin-top: 2px; }
 
+    /* ===== PROP PHOTO ===== */
+    .prop-thumb {
+      width: 36px; height: 36px; border-radius: 5px; object-fit: cover;
+      cursor: pointer; border: 1px solid rgba(255,255,255,0.12); flex-shrink: 0;
+      transition: opacity 0.15s, transform 0.15s;
+    }
+    .prop-thumb:hover { opacity: 0.85; transform: scale(1.05); }
+    .prop-thumb-check {
+      width: 52px; height: 52px; border-radius: 6px; object-fit: cover;
+      display: block; margin-bottom: 6px; cursor: pointer;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+    .prop-photo-lightbox {
+      position: fixed; inset: 0; z-index: 900; background: rgba(0,0,0,0.85);
+      display: flex; align-items: center; justify-content: center; cursor: zoom-out;
+    }
+    .prop-photo-lightbox img { max-width: 90vw; max-height: 90vh; border-radius: 8px; object-fit: contain; }
+    .prop-photo-preview {
+      width: 80px; height: 80px; border-radius: 8px; object-fit: cover;
+      border: 1px solid #2a2a3e; margin-top: 8px; cursor: pointer;
+    }
+    .prop-photo-upload-row {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 6px;
+    }
+    .prop-photo-clear-btn {
+      background: transparent; border: 1px solid #e63946; color: #e63946;
+      border-radius: 4px; font-size: 11px; padding: 3px 8px; cursor: pointer;
+    }
+    .prop-photo-clear-btn:hover { background: rgba(230,57,70,0.1); }
+    .prop-notes-photo {
+      width: 100%; max-height: 220px; object-fit: contain; border-radius: 8px;
+      margin-bottom: 12px; border: 1px solid #2a2a3e; cursor: zoom-in;
+    }
+
     /* ===== PROP NOTES MODAL ===== */
     .prop-notes-modal { position: fixed; inset: 0; z-index: 400; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; }
     .prop-notes-card { background: #1a1a2e; border: 1px solid #2a2a3e; border-radius: 12px; padding: 24px; width: 520px; max-width: 90vw; max-height: 80vh; overflow-y: auto; }

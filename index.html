@@ -962,6 +962,26 @@
     .email-notes-meta { font-family:"DM Mono",monospace; font-size:11px; color:var(--text-muted); margin-bottom:16px; }
     .email-open-btn--disabled { opacity:0.35; cursor:not-allowed; pointer-events:none; }
 
+    /* Email All button + warning banner */
+    .email-all-section { margin-bottom:16px; }
+    .email-all-btn {
+      width:100%; padding:12px 20px; background:var(--gold); color:var(--bg-deep);
+      border:none; border-radius:8px; font-size:14px; font-weight:600;
+      cursor:pointer; transition:background 0.2s, opacity 0.2s;
+      font-family:'DM Sans',sans-serif; letter-spacing:0.3px;
+    }
+    .email-all-btn:hover:not(.email-open-btn--disabled) { background:var(--gold-light, #e0c04a); }
+    .email-all-btn.email-open-btn--disabled {
+      background:var(--bg-border); color:var(--text-muted);
+      opacity:0.5; cursor:not-allowed; pointer-events:none;
+    }
+    .email-notes-warning {
+      background:rgba(212,175,55,0.1); border:1px solid rgba(212,175,55,0.25);
+      border-radius:6px; padding:8px 12px; margin-bottom:12px;
+      font-family:'DM Mono',monospace; font-size:11px; color:var(--gold);
+    }
+    .email-single-btn { min-width:60px; text-align:center; }
+
     /* ===== UTILITY ===== */
     .sr-only {
       position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;

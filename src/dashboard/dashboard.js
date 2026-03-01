@@ -75,10 +75,16 @@ async function renderProductionCards(memberSnaps) {
   }
   grid.innerHTML = '';
   const uid = state.currentUser.uid;
+  // Safety dedup: track rendered production IDs to prevent duplicate cards
+  const renderedProdIds = new Set();
 
   for (const memberDoc of memberSnaps.docs) {
-    // memberDoc path: productions/{productionId}/members/{uid}
     const productionRef = memberDoc.ref.parent.parent;
+    const prodId = productionRef.id;
+
+    // Skip if we already rendered a card for this production
+    if (renderedProdIds.has(prodId)) continue;
+
     const role = memberDoc.data().role || 'member';
 
     try {
@@ -86,7 +92,10 @@ async function renderProductionCards(memberSnaps) {
       if (!prodSnap.exists()) continue;
       const prod = prodSnap.data();
 
-      // Get member count
+      // Final dedup check (covers async race)
+      if (renderedProdIds.has(prodSnap.id)) continue;
+      renderedProdIds.add(prodSnap.id);
+
       const membersSnap = await getDocs(collection(db, 'productions', prodSnap.id, 'members'));
       const memberCount = membersSnap.size;
 

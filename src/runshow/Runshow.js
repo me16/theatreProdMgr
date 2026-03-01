@@ -1685,58 +1685,175 @@ async function confirmFabNote() {
 
 
 /* ═══════════════════════════════════════════════════════════
-   FEATURE 7: PER-ACTOR EMAIL NOTES
+   FEATURE 7: PER-ACTOR EMAIL NOTES (revised)
    ═══════════════════════════════════════════════════════════ */
+
+/** Build a formatted email body for one actor's line notes. */
+function _buildActorEmailBody(actorName, notes, show, dateStr) {
+  const NOTE_TYPE_LABELS = { skp: 'SKIP', para: 'PARAPHRASE', line: 'LINE', add: 'ADDITION', gen: 'GENERAL' };
+  const sorted = [...notes].sort((a, b) =>
+    a.page !== b.page ? a.page - b.page : (a.bounds?.y || 0) - (b.bounds?.y || 0)
+  );
+  let body = 'Hi ' + actorName + ',\n\nHere are your line notes from ' + show + ' on ' + dateStr + ':\n';
+  sorted.forEach(n => {
+    const typeLabel = NOTE_TYPE_LABELS[n.type] || n.type.toUpperCase();
+    const lineText = (n.lineText || '').slice(0, 150) + ((n.lineText || '').length > 150 ? '...' : '');
+    body += '\n---------';
+    body += '\nPage: ' + rsScriptLabel(n.page, n.half);
+    body += '\nType: ' + typeLabel;
+    if (lineText) body += '\nLine: "' + lineText + '"';
+    if (n.noteBody && n.noteBody.trim()) body += '\nNote: ' + n.noteBody.trim();
+  });
+  body += '\n---------\n\n' + sorted.length + ' note' + (sorted.length !== 1 ? 's' : '') + ' total.\n\n\u2014 ' + show + ' Stage Management';
+  return body;
+}
+
+/** Build a mailto: URI, truncating body if needed to stay under browser limits. */
+function _buildMailtoUri(email, subject, body) {
+  const maxLen = 1800;
+  const safeBody = body.length > maxLen
+    ? body.slice(0, maxLen) + '\n\n[Truncated \u2014 use the Copy button for the full list.]'
+    : body;
+  return 'mailto:' + encodeURIComponent(email)
+    + '?subject=' + encodeURIComponent(subject)
+    + '&body=' + encodeURIComponent(safeBody);
+}
+
+/** Copy text to clipboard with fallback for older browsers. */
+function _copyToClipboard(text) {
+  navigator.clipboard.writeText(text).then(
+    () => toast('Copied to clipboard'),
+    () => {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.cssText = 'position:fixed;left:-9999px;';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      toast('Copied \u2014 paste into your email client');
+    }
+  );
+}
+
+/**
+ * Opens the Email Notes modal.
+ *
+ * Features:
+ *  \u2022 "Email All N Actors" button \u2014 opens staggered mailto windows
+ *  \u2022 Per-actor Email + Copy buttons
+ *  \u2022 Warning banner when actors are missing email addresses
+ *  \u2022 Email body includes Page, Type, Line, and Note for every note
+ */
 function rsOpenEmailNotes() {
   if (rsNotes.length === 0) { toast('No notes to email'); return; }
   const emailModal = document.getElementById('rs-email-notes-modal');
   if (!emailModal) return;
   emailModal.classList.add('open');
+
+  // ── Group notes by cast member ──
   const cast = getCastMembers();
   const byCastId = {};
   rsNotes.forEach(n => {
     const castId = n.castId || n.charId;
     if (!byCastId[castId]) {
       const member = cast.find(m => m.id === castId);
-      byCastId[castId] = { actorName: member?.name || n.characterName || n.charName || '?', actorEmail: member?.email || '', color: member?.color || n.charColor || '#888', notes: [] };
+      byCastId[castId] = {
+        actorName: member?.name || n.characterName || n.charName || '?',
+        actorEmail: member?.email || '',
+        color: member?.color || n.charColor || '#888',
+        notes: [],
+      };
     }
     byCastId[castId].notes.push(n);
   });
+
   const show = state.activeProduction?.title || '';
   const dateStr = new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-  const subject = 'Line Notes — ' + show + ' — ' + dateStr;
+  const subject = 'Line Notes \u2014 ' + show + ' \u2014 ' + dateStr;
   const totalNotes = rsNotes.length;
-  const actorCount = Object.keys(byCastId).length;
-  const NOTE_TYPE_LABELS = { skp: 'SKIP', para: 'PARAPHRASE', line: 'LINE', add: 'ADDITION', gen: 'GENERAL' };
-  const actorRows = Object.entries(byCastId).filter(([, d]) => d.notes.length > 0).map(([cid, data]) => {
-    const sorted = [...data.notes].sort((a, b) => a.page !== b.page ? a.page - b.page : (a.bounds?.y || 0) - (b.bounds?.y || 0));
-    const noteCount = sorted.length;
+  const actorEntries = Object.entries(byCastId).filter(([, d]) => d.notes.length > 0);
+  const actorCount = actorEntries.length;
+  const actorsWithEmail = actorEntries.filter(([, d]) => !!d.actorEmail);
+  const actorsWithoutEmail = actorEntries.filter(([, d]) => !d.actorEmail);
+
+  // ── Per-actor rows ──
+  const actorRows = actorEntries.map(([cid, data]) => {
+    const noteCount = data.notes.length;
     const hasEmail = !!data.actorEmail;
-    let body = 'Hi ' + data.actorName + ',\n\nHere are your line notes from ' + show + ' on ' + dateStr + ':\n';
-    sorted.forEach(n => {
-      const typeLabel = NOTE_TYPE_LABELS[n.type] || n.type.toUpperCase();
-      const lineText = (n.lineText || '').slice(0, 150) + ((n.lineText || '').length > 150 ? '...' : '');
-      body += '\n---------\np.' + rsScriptLabel(n.page, n.half) + ' [' + typeLabel + ']';
-      if (lineText) body += '\nScript line: "' + lineText + '"';
-      if (n.noteBody && n.noteBody.trim()) body += '\nNote: ' + n.noteBody.trim();
-    });
-    body += '\n---------\n\n' + noteCount + ' note' + (noteCount !== 1 ? 's' : '') + ' total.\n\n\u2014 ' + show + ' Stage Management';
-    const mailtoBody = body.length > 1800 ? body.slice(0, 1800) + '\n\n[Note: Some notes may be truncated. Use the Copy button for the full list.]' : body;
-    const mailtoUri = 'mailto:' + encodeURIComponent(data.actorEmail) + '?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(mailtoBody);
-    const emailDisplay = hasEmail ? '<span class="actor-email">' + escapeHtml(data.actorEmail) + '</span>' : '<span class="actor-email actor-email--warn">No email \u2014 update in Cast &amp; Crew tab</span>';
-    return '<div class="email-actor-row" data-castid="' + escapeHtml(cid) + '"><div class="actor-dot" style="background:' + escapeHtml(data.color) + '"></div><div class="actor-info"><span class="actor-name">' + escapeHtml(data.actorName) + '</span>' + emailDisplay + '</div><span class="actor-note-count">' + noteCount + ' note' + (noteCount !== 1 ? 's' : '') + '</span><button class="modal-btn-primary email-open-btn ' + (hasEmail ? '' : 'email-open-btn--disabled') + '" data-mailto="' + escapeHtml(mailtoUri) + '">Open Email</button><button class="modal-btn-cancel email-copy-btn" data-body="' + escapeHtml(body) + '">Copy</button></div>';
+    const body = _buildActorEmailBody(data.actorName, data.notes, show, dateStr);
+    const mailtoUri = hasEmail ? _buildMailtoUri(data.actorEmail, subject, body) : '';
+    const emailDisplay = hasEmail
+      ? '<span class="actor-email">' + escapeHtml(data.actorEmail) + '</span>'
+      : '<span class="actor-email actor-email--warn">No email \u2014 update in Cast &amp; Crew tab</span>';
+
+    return '<div class="email-actor-row" data-castid="' + escapeHtml(cid) + '">'
+      + '<div class="actor-dot" style="background:' + escapeHtml(data.color) + '"></div>'
+      + '<div class="actor-info"><span class="actor-name">' + escapeHtml(data.actorName) + '</span>' + emailDisplay + '</div>'
+      + '<span class="actor-note-count">' + noteCount + ' note' + (noteCount !== 1 ? 's' : '') + '</span>'
+      + '<button class="modal-btn-primary email-single-btn' + (hasEmail ? '' : ' email-open-btn--disabled') + '"'
+      +   ' data-mailto="' + escapeHtml(mailtoUri) + '"'
+      +   ' title="Email ' + escapeHtml(data.actorName) + '">Email</button>'
+      + '<button class="modal-btn-cancel email-copy-btn"'
+      +   ' data-body="' + escapeHtml(body) + '"'
+      +   ' title="Copy notes for ' + escapeHtml(data.actorName) + '">Copy</button>'
+      + '</div>';
   }).join('');
-  emailModal.innerHTML = '<div class="send-notes-card"><h3>Email Notes</h3><div class="email-notes-meta">' + escapeHtml(dateStr) + ' \u00b7 ' + totalNotes + ' notes \u00b7 ' + actorCount + ' actors</div>' + actorRows + '<div class="send-notes-actions"><button class="modal-btn-cancel" id="rs-email-notes-close">Close</button></div></div>';
+
+  // ── Warning + Email All ──
+  const emailAllDisabled = actorsWithEmail.length === 0;
+  const emailAllLabel = emailAllDisabled
+    ? 'No actors have email addresses'
+    : 'Email All ' + actorsWithEmail.length + ' Actor' + (actorsWithEmail.length !== 1 ? 's' : '');
+  const warningBanner = actorsWithoutEmail.length > 0
+    ? '<div class="email-notes-warning">'
+      + actorsWithoutEmail.length + ' actor' + (actorsWithoutEmail.length !== 1 ? 's' : '')
+      + ' missing email \u2014 update in Cast &amp; Crew tab</div>'
+    : '';
+
+  // ── Render modal ──
+  emailModal.innerHTML = '<div class="send-notes-card">'
+    + '<h3>Email Notes</h3>'
+    + '<div class="email-notes-meta">' + escapeHtml(dateStr)
+    +   ' \u00b7 ' + totalNotes + ' notes \u00b7 ' + actorCount + ' actors</div>'
+    + warningBanner
+    + '<div class="email-all-section">'
+    +   '<button class="email-all-btn' + (emailAllDisabled ? ' email-open-btn--disabled' : '')
+    +     '" id="rs-email-all-btn">' + emailAllLabel + '</button>'
+    + '</div>'
+    + actorRows
+    + '<div class="send-notes-actions">'
+    +   '<button class="modal-btn-cancel" id="rs-email-notes-close">Close</button>'
+    + '</div></div>';
+
+  // ── Event listeners ──
+
+  // Close
   emailModal.querySelector('#rs-email-notes-close').addEventListener('click', () => emailModal.classList.remove('open'));
   emailModal.addEventListener('click', e => { if (e.target === emailModal) emailModal.classList.remove('open'); });
-  emailModal.querySelectorAll('.email-open-btn:not(.email-open-btn--disabled)').forEach(btn => {
+
+  // "Email All" \u2014 stagger mailto opens to avoid popup-blocker issues
+  if (!emailAllDisabled) {
+    emailModal.querySelector('#rs-email-all-btn').addEventListener('click', () => {
+      let delay = 0;
+      actorsWithEmail.forEach(([cid, data]) => {
+        const body = _buildActorEmailBody(data.actorName, data.notes, show, dateStr);
+        const uri = _buildMailtoUri(data.actorEmail, subject, body);
+        setTimeout(() => { window.open(uri, '_blank'); }, delay);
+        delay += 300;
+      });
+      toast('Opening ' + actorsWithEmail.length + ' email' + (actorsWithEmail.length !== 1 ? 's' : '') + '\u2026');
+    });
+  }
+
+  // Per-actor email buttons
+  emailModal.querySelectorAll('.email-single-btn:not(.email-open-btn--disabled)').forEach(btn => {
     btn.addEventListener('click', () => { window.open(btn.dataset.mailto, '_blank'); });
   });
+
+  // Per-actor copy buttons
   emailModal.querySelectorAll('.email-copy-btn').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      try { await navigator.clipboard.writeText(btn.dataset.body); toast('Copied to clipboard'); }
-      catch(e) { const ta = document.createElement('textarea'); ta.value = btn.dataset.body; ta.style.cssText = 'position:fixed;left:-9999px;'; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); toast('Select and copy manually'); }
-    });
+    btn.addEventListener('click', () => _copyToClipboard(btn.dataset.body));
   });
 }
 

@@ -5,9 +5,10 @@ import { renderCastTab } from '../cast/cast.js';
 import { renderSettingsTab } from '../settings/settings.js';
 import { onRunShowTabActivated } from '../RunShow/Runshow.js';
 import { onPropsTabActivated } from '../props/props.js';
+import { onTrackingTabActivated } from '../tracking/tracking-tab.js';
 import { setRoute } from './router.js';
 
-const TAB_ROUTE_MAP = { runshow:'runshow', props:'props', linenotes:'script', cast:'cast', settings:'settings' };
+const TAB_ROUTE_MAP = { runshow:'runshow', tracking:'tracking', linenotes:'script', cast:'cast', settings:'settings' };
 
 let activeTab = 'runshow';
 
@@ -57,9 +58,8 @@ export function switchTab(tabId) {
     case 'settings':
       renderSettingsTab();
       break;
-    // 'props' — handled by its own Firestore subscription
-    case 'props':
-      onPropsTabActivated();
+    case 'tracking':
+      onTrackingTabActivated();
       break;
   }
 }

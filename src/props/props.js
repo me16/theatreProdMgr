@@ -12,6 +12,14 @@ import { buildCastPicker, getCastMembers, subscribeToCast } from '../cast/cast.j
 import { syncSessionToFirestore, startSessionSync, stopSessionSync, hideHeartbeat } from '../shared/session-sync.js';
 import { loadCheckState, saveCheckState, checkProgress, renderProgressBar } from '../shared/check-state.js';
 import { updateRouteParams } from '../shared/router.js';
+import { getProductionLocations } from '../tracking/locations.js';
+
+function _locOptions(selectedVal) {
+  const locs = getProductionLocations();
+  const legacy = { 'SL': 'backstage-left', 'SR': 'backstage-right', 'ON': 'on-stage' };
+  const resolvedSel = legacy[selectedVal] || selectedVal || 'backstage-left';
+  return locs.map(l => '<option value="' + l.id + '"' + (l.id === resolvedSel ? ' selected' : '') + '>' + l.shortName + '</option>').join('');
+}
 
 let props = [];
 let propNotes = {};
@@ -224,7 +232,7 @@ function subscribeToProps() {
 }
 
 function renderContent() {
-  if (!document.getElementById('tab-props')?.classList.contains('tab-panel--active')) return;
+  if (!document.getElementById('tab-tracking')?.classList.contains('tab-panel--active')) return;
   // Skip manage tab re-render if user is actively editing a prop (prevents input loss)
   if (activeTab === 'manage' && editingPropId) return;
   switch (activeTab) {
@@ -258,15 +266,13 @@ function renderManageTab() {
       <div class="cue-row" data-idx="${i}">
         <span class="cue-num">#${i + 1}</span>
         <select class="form-select cue-enter-loc" title="Enter from">
-          <option value="SL" ${enterLoc === 'SL' ? 'selected' : ''}>SL</option>
-          <option value="SR" ${enterLoc === 'SR' ? 'selected' : ''}>SR</option>
+          ${_locOptions(enterLoc)}
         </select>
         <input class="form-input cue-enter" type="number" min="1" placeholder="Enter pg" value="${c.enterPage || ''}" />
         <span class="arrow">\u2192</span>
         <input class="form-input cue-exit" type="number" min="1" placeholder="Exit pg" value="${c.exitPage || ''}" />
         <select class="form-select cue-loc">
-          <option value="SL" ${c.exitLocation === 'SL' ? 'selected' : ''}>SL</option>
-          <option value="SR" ${c.exitLocation === 'SR' ? 'selected' : ''}>SR</option>
+          ${_locOptions(c.exitLocation || 'SL')}
         </select>
         <input class="form-input carrier-input cue-con" type="text" maxlength="100" placeholder="Carrier On" value="${escapeHtml(c.carrierOn || '')}" />
         <input class="form-input carrier-input cue-coff" type="text" maxlength="100" placeholder="Carrier Off" value="${escapeHtml(c.carrierOff || '')}" />
@@ -306,8 +312,7 @@ function renderManageTab() {
       <div class="form-row">
         <label>Starting Location</label>
         <select class="form-select" id="prop-start-select">
-          <option value="SL" ${(editProp?.start || 'SL') === 'SL' ? 'selected' : ''}>Stage Left</option>
-          <option value="SR" ${editProp?.start === 'SR' ? 'selected' : ''}>Stage Right</option>
+          ${_locOptions(editProp?.start || 'SL')}
         </select>
       </div>
       <div class="form-row" style="flex-direction:column;align-items:flex-start;">

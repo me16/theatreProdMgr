@@ -29,6 +29,8 @@ import {
   startRunSession, endRunSession, setRunShowNotifyCallback,
 } from '../props/props.js';
 import { detectActiveSession, showRecoveryDialog, hydrateSessionFromFirestore, abandonSession, startSessionSync, syncSessionToFirestore } from '../shared/session-sync.js';
+import { renderMarginCues, renderCueDetailPanel, renderCueSummaryPanel } from './cue-margin.js';
+import { renderTrackingWidget, refreshWidgetBadges, refreshWidgetContent } from '../tracking/stage-widget.js';
 // Zone extraction is self-contained in runshow.js — no linenotes imports needed for rendering
 // Script page label helpers are defined locally below (rsScriptLabel / rsScriptOffset).
 
@@ -72,6 +74,10 @@ let rsScriptCuesUnsub = null;
 let rsDiagrams = [];
 let rsDiagramsUnsub = null;
 let rsDiagramZoomLevel = 1;
+
+// Cue margin state
+let rsSelectedCue = null;
+let rsDiagramPanelMode = 'diagrams'; // 'diagrams' | 'cues'
 
 // Timer-driven page tracking — last script page the timer navigated to
 let rsLastTimerScriptPage = 0;
@@ -461,7 +467,7 @@ function renderRunShowControls() {
           <div class="rs-timer-field"><label>Duration (min)</label><span>${escapeHtml(lastDuration)}</span></div>
           <div class="rs-timer-field"><label>Warn Pages</label><span>${escapeHtml(lastWarnPages)}</span></div>
         </div>
-        <div class="rs-stage-widget">${stageCols}</div>
+        <div class="rs-tracking-widget"></div>
         <div class="rs-reports-section" id="rs-reports-section"></div>
       </div>`;
     container.querySelector('#rs-start-run-btn').addEventListener('click', openPreRunModal);
@@ -491,7 +497,7 @@ function renderRunShowControls() {
           </div>
           <div class="rs-timer-page">Page: <strong>${rsScriptLabel(rsCurrentPage, rsCurrentHalf)}</strong></div>
         </div>
-        <div class="rs-stage-widget">${stageCols}</div>
+        <div class="rs-tracking-widget"></div>
         <div class="rs-scratchpad-section">
           <label style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);">Scratchpad</label>
           <textarea id="rs-scratchpad" class="rs-scratchpad-input" placeholder="SM notes…">${escapeHtml(session.scratchpad || '')}</textarea>
@@ -518,6 +524,12 @@ function renderRunShowControls() {
     // FAB visibility
     const fab = document.getElementById('run-show-fab');
     if (fab) fab.classList.remove('hidden');
+  }
+
+  // P6: Populate tracking widget after either branch renders
+  const _twContainer = container.querySelector('.rs-tracking-widget');
+  if (_twContainer) {
+    renderTrackingWidget(_twContainer, rsCurrentScriptPage(), state.runSession?.timerWarnPages || 5);
   }
 }
 
@@ -582,9 +594,12 @@ function rsTickTimerDisplay() {
   if (holdBtn) holdBtn.disabled = !timerRunning || timerHeld;
   if (stopBtn) stopBtn.disabled = !timerRunning && !timerHeld;
 
-  // Update stage columns — always based on the actual visible page
-  const stageWidget = document.querySelector('.rs-stage-widget');
-  if (stageWidget) stageWidget.innerHTML = renderStageColumnsHtml(rsCurrentScriptPage());
+  // P6: Update tracking widget — refresh active tab content + badges
+  const _twEl = document.querySelector('.rs-tracking-widget');
+  if (_twEl) {
+    refreshWidgetContent(_twEl, rsCurrentScriptPage(), state.runSession?.timerWarnPages || 5);
+    refreshWidgetBadges(_twEl, rsCurrentScriptPage(), state.runSession?.timerWarnPages || 5);
+  }
 }
 
 function renderStageColumnsHtml(page) {
@@ -762,14 +777,120 @@ function rsSubscribeToScriptCues() {
 }
 
 function rsRenderCueBanner() {
-  const banner = document.getElementById('rs-cue-banner');
-  if (!banner) return;
+  // Render margin cues in the overlay (replaces old banner pills)
+  const overlay = document.getElementById('rs-hit-overlay');
   const pageCues = rsScriptCues.filter(c => c.page === rsCurrentScriptPage());
-  if (pageCues.length === 0) { banner.innerHTML = ''; return; }
-  banner.innerHTML = pageCues.map(c => {
-    const typeClass = ['LX', 'SQ', 'PX'].includes(c.type) ? c.type : 'OTHER';
-    return `<span class="rs-cue-pill rs-cue-pill--${escapeHtml(typeClass)}" title="${escapeHtml(c.label || '')}">${escapeHtml(c.label || c.type)}</span>`;
-  }).join('');
+  if (overlay) {
+    const canvasW = document.getElementById('rs-canvas')?.offsetWidth || 600;
+    renderMarginCues(pageCues, rsCurrentScriptPage(), rsCurrentHalf, overlay, canvasW, (cue) => {
+      rsSelectedCue = cue;
+      rsDiagramPanelMode = 'cues';
+      rsRenderDiagramPanelTabs();
+      const detailEl = document.getElementById('rs-cue-detail-content');
+      if (detailEl) renderCueDetailPanel(cue, detailEl, state.runSession, rsHandleCueGo);
+    });
+  }
+  // Also update the cue summary if that panel tab is active
+  if (rsDiagramPanelMode === 'cues') {
+    const detailEl = document.getElementById('rs-cue-detail-content');
+    if (detailEl && !rsSelectedCue) {
+      renderCueSummaryPanel(pageCues, rsCurrentScriptPage(), detailEl, (cue) => {
+        rsSelectedCue = cue;
+        renderCueDetailPanel(cue, detailEl, state.runSession, rsHandleCueGo);
+        // Highlight the marker
+        overlay?.querySelectorAll('.rs-cue-marker').forEach(el => {
+          el.classList.toggle('rs-cue-marker--selected', el.dataset.cueId === cue.id);
+        });
+      });
+    }
+  }
+  // Keep the old banner element clear (backward compat)
+  const banner = document.getElementById('rs-cue-banner');
+  if (banner) banner.innerHTML = '';
+}
+
+/** Handle GO button press on a cue — marks it as called in Firestore. */
+async function rsHandleCueGo(cue) {
+  if (!state.runSession || !cue) return;
+  const pid = state.activeProduction.id;
+  try {
+    await updateDoc(doc(db, 'productions', pid, 'scriptCues', cue.id), {
+      goTimestamp: Date.now(),
+      goSessionId: state.runSession.sessionId,
+    });
+    toast('Cue called: ' + (cue.label || cue.type), 'success');
+  } catch (e) {
+    toast('Failed to mark cue.', 'error');
+  }
+}
+
+/** Render the Diagrams | Cue Details tab toggle in the diagram panel header. */
+function rsRenderDiagramPanelTabs() {
+  const panel = document.getElementById('rs-diagram-panel');
+  if (!panel) return;
+  let tabBar = panel.querySelector('.rs-diagram-tab-bar');
+  if (!tabBar) {
+    // Create tab bar — insert after the toggle button
+    tabBar = document.createElement('div');
+    tabBar.className = 'rs-diagram-tab-bar';
+    const toggleBtn = document.getElementById('rs-diagram-toggle');
+    if (toggleBtn) toggleBtn.after(tabBar);
+    else panel.prepend(tabBar);
+  }
+  tabBar.innerHTML = `
+    <button class="rs-diagram-tab-btn ${rsDiagramPanelMode === 'diagrams' ? 'rs-diagram-tab-btn--active' : ''}" data-panel-mode="diagrams">Diagrams</button>
+    <button class="rs-diagram-tab-btn ${rsDiagramPanelMode === 'cues' ? 'rs-diagram-tab-btn--active' : ''}" data-panel-mode="cues">Cue Details</button>
+  `;
+  tabBar.querySelectorAll('.rs-diagram-tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      rsDiagramPanelMode = btn.dataset.panelMode;
+      rsRenderDiagramPanelTabs();
+      rsUpdateDiagramPanelContent();
+    });
+  });
+  rsUpdateDiagramPanelContent();
+}
+
+/** Show/hide diagram viewer vs cue detail content based on active panel mode. */
+function rsUpdateDiagramPanelContent() {
+  const viewer = document.getElementById('rs-diagram-viewer');
+  const zoomCtrl = document.getElementById('rs-diagram-zoom-controls');
+  let cueDetail = document.getElementById('rs-cue-detail-content');
+  const panel = document.getElementById('rs-diagram-panel');
+
+  // Ensure cue detail container exists
+  if (!cueDetail && panel) {
+    cueDetail = document.createElement('div');
+    cueDetail.id = 'rs-cue-detail-content';
+    cueDetail.style.cssText = 'flex:1;overflow-y:auto;';
+    panel.appendChild(cueDetail);
+  }
+
+  if (rsDiagramPanelMode === 'diagrams') {
+    if (viewer) viewer.style.display = '';
+    if (zoomCtrl) zoomCtrl.style.display = panel?.classList.contains('collapsed') ? 'none' : 'flex';
+    if (cueDetail) cueDetail.style.display = 'none';
+  } else {
+    if (viewer) viewer.style.display = 'none';
+    if (zoomCtrl) zoomCtrl.style.display = 'none';
+    if (cueDetail) cueDetail.style.display = '';
+    // Expand diagram panel if collapsed to show cue details
+    if (panel?.classList.contains('collapsed')) {
+      panel.classList.remove('collapsed');
+      const toggleBtn = document.getElementById('rs-diagram-toggle');
+      if (toggleBtn) toggleBtn.textContent = '«';
+    }
+    // Render cue content
+    const pageCues = rsScriptCues.filter(c => c.page === rsCurrentScriptPage());
+    if (rsSelectedCue) {
+      renderCueDetailPanel(rsSelectedCue, cueDetail, state.runSession, rsHandleCueGo);
+    } else {
+      renderCueSummaryPanel(pageCues, rsCurrentScriptPage(), cueDetail, (cue) => {
+        rsSelectedCue = cue;
+        renderCueDetailPanel(cue, cueDetail, state.runSession, rsHandleCueGo);
+      });
+    }
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -1262,6 +1383,8 @@ function rsRedrawOverlay(num) {
   hitOverlay.innerHTML = '';
   rsRenderLineZones(rsPk());
   rsRenderNoteMarkers(num, rsCurrentHalf);
+  // Render margin cues on overlay (after zones & notes so they layer on top)
+  rsRenderCueBanner();
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -1496,6 +1619,7 @@ function rsGlobalMouseUp(e) {
    PAGE NAVIGATION
    ═══════════════════════════════════════════════════════════ */
 async function rsChangePage(delta) {
+  rsSelectedCue = null; // Clear cue selection on page change
   if (!rsPdfDoc) return;
   if (rsSplitMode) {
     if (delta > 0) {

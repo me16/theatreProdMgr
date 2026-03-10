@@ -15,6 +15,12 @@
     --bg-raised: #1E1E32; --bg-border: #2A2A42; --bg-hover: #1e1e34;
     --text-primary: #E8E8F0; --text-secondary: #9898B0; --text-muted: #5C5C72;
     --red: #E04050; --green: #38A060; --blue: #5b9bd4;
+    /* Tracking type colors */
+    --track-prop: #C8A96E; --track-actor: #5B9BD4; --track-scenic: #6B8F4E; --track-costume: #9B7BC8;
+    /* Tracking state colors */
+    --state-hold: #D4AF37; --state-on: #4CAF50; --state-off: #555555; --qc-alert: #E89B3E;
+    /* Tracking widget layout */
+    --widget-tab-height: 30px;
     /* --ln-* parchment variables REMOVED — unified palette only */
   }
   .app-topbar { display:flex; align-items:center; height:52px; background:var(--bg-base); border-bottom:1px solid var(--bg-border); padding:0 16px; flex-shrink:0; gap:12px; }
@@ -267,6 +273,33 @@
     .props-subtab:hover { color: #ccc; }
     .props-subtab--active { color: #d4af37; border-bottom-color: #d4af37; }
     .props-content { flex: 1; overflow-y: auto; padding: 24px; }
+
+    /* ===== TRACKING TYPE TABS (outer subtabs) ===== */
+    .tracking-type-tabs {
+      display: flex; gap: 2px; padding: 6px 12px; background: var(--bg-deep);
+      border-bottom: 1px solid var(--bg-border); flex-shrink: 0;
+    }
+    .tracking-type-tab {
+      padding: 6px 16px; background: transparent; border: 1px solid transparent;
+      border-radius: 6px; color: var(--text-muted); font-size: 12px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; transition: all 0.2s;
+      position: relative;
+    }
+    .tracking-type-tab:hover { color: var(--text-secondary); background: var(--bg-raised); }
+    .tracking-type-tab--active { color: var(--gold); background: var(--bg-raised); border-color: var(--bg-border); }
+    .tracking-type-tab--active[data-track-type="props"] { color: var(--track-prop); }
+    .tracking-type-tab--active[data-track-type="actors"] { color: var(--track-actor); }
+    .tracking-type-tab--active[data-track-type="scenic"] { color: var(--track-scenic); }
+    .tracking-type-tab--active[data-track-type="costumes"] { color: var(--track-costume); }
+    .tracking-type-tab .tracking-badge {
+      position: absolute; top: 2px; right: 2px; width: 14px; height: 14px;
+      border-radius: 50%; font-size: 9px; line-height: 14px; text-align: center;
+      background: var(--text-muted); color: var(--bg-deep);
+    }
+    .tracking-type-tab .tracking-badge--alert {
+      background: var(--gold); animation: badge-pulse 1.5s ease-in-out infinite;
+    }
+    @keyframes badge-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.7; } }
 
     /* ===== PROP FORM ===== */
     .prop-form {
@@ -871,6 +904,24 @@
     .rs-timer-field label { color:var(--text-muted); }
     .rs-timer-field span { font-family:'DM Mono',monospace; color:var(--text-secondary); }
 
+    /* Run Show — tracking widget (P6) */
+    .rs-tracking-widget { border-radius:8px; overflow:hidden; border:1px solid var(--bg-border); }
+    .sw-tab-bar { display:flex; height:var(--widget-tab-height); background:var(--bg-raised); }
+    .sw-tab {
+      flex:1; background:none; border:none; border-bottom:2px solid transparent; color:var(--text-muted);
+      font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; cursor:pointer;
+      transition:all 0.2s; position:relative; padding:0 4px;
+    }
+    .sw-tab:hover { color:var(--text-secondary); }
+    .sw-tab--active { border-bottom-color:currentColor; }
+    .sw-badge {
+      display:inline-block; min-width:14px; height:14px; line-height:14px; border-radius:7px;
+      font-size:9px; text-align:center; background:var(--text-muted); color:var(--bg-deep);
+      margin-left:3px; vertical-align:middle;
+    }
+    .sw-badge--alert { background:var(--gold); animation:badge-pulse 1.5s ease-in-out infinite; }
+    .sw-content { max-height:320px; overflow-y:auto; }
+
     /* Run Show — stage columns widget */
     .rs-stage-columns { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; }
     .rs-stage-columns .stage-col { border-radius:8px; padding:10px; }
@@ -945,6 +996,34 @@
     .rs-cue-pill--SQ { background:#2D1A14; color:#E63946; }
     .rs-cue-pill--PX { background:#1A2A1A; color:#2D8A4E; }
     .rs-cue-pill--FLY, .rs-cue-pill--CARP, .rs-cue-pill--OTHER { background:#2E2C29; color:#9A9488; }
+
+    /* ===== Margin Cue Markers ===== */
+    .rs-cue-marker { box-shadow:0 2px 8px rgba(0,0,0,0.3); }
+    .rs-cue-marker:hover { transform:scale(1.08); box-shadow:0 4px 12px rgba(0,0,0,0.4); z-index:20; }
+    .rs-cue-marker--selected { outline:2px solid #fff; outline-offset:1px; z-index:21; }
+    .rs-cue-marker--called { opacity:0.7; }
+    .rs-cue-go-btn {
+      width:100%; padding:10px; margin-top:8px; background:var(--green); color:#fff; border:none;
+      border-radius:6px; font-size:14px; font-weight:600; cursor:pointer; transition:background 0.2s;
+    }
+    .rs-cue-go-btn:hover { background:#38a05e; }
+    .rs-cue-summary-list { display:flex; flex-direction:column; }
+    .rs-cue-summary-row {
+      display:flex; align-items:center; gap:8px; padding:8px 12px;
+      border-bottom:1px solid var(--bg-border); transition:background 0.15s;
+    }
+    .rs-cue-summary-row:hover { background:var(--bg-raised); }
+    .rs-cue-summary-row--called { opacity:0.6; }
+    /* Diagram panel tab bar */
+    .rs-diagram-tab-bar {
+      display:flex; border-bottom:1px solid var(--bg-border); flex-shrink:0;
+    }
+    .rs-diagram-tab-btn {
+      flex:1; padding:5px 8px; background:none; border:none; border-bottom:2px solid transparent;
+      color:var(--text-muted); font-size:11px; font-weight:500; cursor:pointer; transition:all 0.2s;
+    }
+    .rs-diagram-tab-btn:hover { color:var(--text-secondary); }
+    .rs-diagram-tab-btn--active { color:var(--gold); border-bottom-color:var(--gold); }
 
     /* ===== FEATURE 4: Diagram panel ===== */
     .diagram-panel { width:220px; min-width:220px; border-right:1px solid var(--bg-border); background:#141312; display:flex; flex-direction:column; overflow:hidden; transition:width 0.25s ease, min-width 0.25s ease; }
@@ -1237,7 +1316,7 @@
     <!-- Tab Bar -->
     <div class="app-tabbar">
       <button class="app-tab app-tab--active" data-tab="runshow">Run Show</button>
-      <button class="app-tab" data-tab="props">Props</button>
+      <button class="app-tab" data-tab="tracking">Tracking</button>
       <button class="app-tab" data-tab="linenotes">Edit Script</button>
       <button class="app-tab" data-tab="cast">Cast &amp; Crew</button>
       <button class="app-tab" data-tab="settings">Settings</button>
@@ -1392,8 +1471,16 @@
       <!-- Email notes modal (Feature 7) -->
       <div class="send-notes-modal" id="rs-email-notes-modal"></div>
 
-      <!-- PROPS TAB -->
-      <div class="tab-panel" id="tab-props">
+      <!-- TRACKING TAB (was Props) -->
+      <div class="tab-panel" id="tab-tracking">
+        <!-- Outer subtabs: tracking type -->
+        <div class="tracking-type-tabs" id="tracking-type-tabs">
+          <button class="tracking-type-tab tracking-type-tab--active" data-track-type="props">Props</button>
+          <button class="tracking-type-tab" data-track-type="actors">Actors</button>
+          <button class="tracking-type-tab" data-track-type="scenic">Scenic</button>
+          <button class="tracking-type-tab" data-track-type="costumes">Costumes</button>
+        </div>
+        <!-- Inner subtabs: mode (per-type, initially props) -->
         <div class="props-subtabs" id="props-subtabs">
           <button class="props-subtab props-subtab--active" data-subtab="manage">Manage Props</button>
           <button class="props-subtab" data-subtab="view">View Show</button>

@@ -10,6 +10,7 @@ import { initLineNotes, resetLineNotes } from './linenotes/linenotes.js';
 import { initCast } from './cast/cast.js';
 import { initSettings } from './settings/settings.js';
 import { initTabs } from './shared/tabs.js';
+import { initTrackingTab } from './tracking/tracking-tab.js';
 import { initRouter, navigate } from './shared/router.js';
 
 // Initialize all modules
@@ -21,6 +22,7 @@ initLineNotes();
 initCast();
 initSettings();
 initTabs();
+initTrackingTab();
 
 // P2: Initialize router
 initRouter((action, prodId, tab, params) => {

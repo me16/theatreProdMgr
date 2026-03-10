@@ -11,7 +11,8 @@ let _onRouteChange = null;
 const ROUTES = [
   { pattern: /^#\/dashboard$/, action: 'dashboard' },
   { pattern: /^#\/([^/]+)\/runshow$/, action: 'tab', tab: 'runshow' },
-  { pattern: /^#\/([^/]+)\/props/, action: 'tab', tab: 'props' },
+  { pattern: /^#\/([^/]+)\/tracking/, action: 'tab', tab: 'tracking' },
+  { pattern: /^#\/([^/]+)\/props/, action: 'tab', tab: 'tracking' },
   { pattern: /^#\/([^/]+)\/script/, action: 'tab', tab: 'linenotes' },
   { pattern: /^#\/([^/]+)\/cast$/, action: 'tab', tab: 'cast' },
   { pattern: /^#\/([^/]+)\/settings$/, action: 'tab', tab: 'settings' },

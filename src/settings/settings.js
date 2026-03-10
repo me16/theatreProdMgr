@@ -8,14 +8,35 @@ import {
   serverTimestamp
 } from 'firebase/firestore';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
+import {
+  getProductionLocations, initProductionLocations, subscribeToLocations,
+  saveLocation, deleteLocation, reorderLocations, DEFAULT_LOCATIONS
+} from '../tracking/locations.js';
+
+let _locationsSubbed = false;
 
 export function initSettings() {
-  // no-op
+  // no-op — location subscription is started on first renderSettingsTab()
+}
+
+function _ensureLocationsSub() {
+  if (_locationsSubbed) return;
+  const pid = state.activeProduction?.id;
+  if (!pid) return;
+  _locationsSubbed = true;
+  subscribeToLocations(pid, () => {
+    // Refresh settings locations list if visible
+    if (document.getElementById('settings-locations-list')) {
+      loadSettingsLocations();
+    }
+  });
 }
 
 export async function renderSettingsTab() {
   const container = document.getElementById('settings-content');
   if (!container) return;
+
+  _ensureLocationsSub();
 
   const owner = isOwner();
   const prod = state.activeProduction;
@@ -60,6 +81,14 @@ export async function renderSettingsTab() {
         <div class="upload-progress" id="settings-upload-progress" style="display:none;margin-top:8px;">
           <div class="upload-progress-bar" id="settings-upload-bar"></div>
         </div>
+      ` : ''}
+    </div>
+
+    <div class="settings-section">
+      <h3>Venue Locations</h3>
+      <div id="settings-locations-list"><div style="color:var(--text-muted);font-size:13px;">Loading…</div></div>
+      ${owner ? `
+        <button class="settings-btn settings-btn--primary" id="settings-add-location-btn" style="margin-top:10px;">+ Add Location</button>
       ` : ''}
     </div>
 
@@ -138,6 +167,147 @@ export async function renderSettingsTab() {
 
   // Load members
   await loadSettingsMembers();
+
+  // Load venue locations
+  await loadSettingsLocations();
+
+  // Wire add-location button
+  if (owner) {
+    container.querySelector('#settings-add-location-btn')?.addEventListener('click', () => {
+      showAddLocationForm(prod.id);
+    });
+  }
+}
+
+async function loadSettingsLocations() {
+  const container = document.getElementById('settings-locations-list');
+  if (!container) return;
+  const owner = isOwner();
+  const pid = state.activeProduction.id;
+
+  // Ensure default locations exist
+  try {
+    await initProductionLocations(pid);
+  } catch (e) {
+    console.warn('initProductionLocations error:', e);
+  }
+
+  const locations = getProductionLocations();
+
+  if (locations.length === 0) {
+    container.innerHTML = '<div style="color:var(--text-muted)">No locations configured.</div>';
+    return;
+  }
+
+  container.innerHTML = locations.map((loc, idx) => `
+    <div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--bg-border);" data-loc-id="${escapeHtml(loc.id)}">
+      <span style="color:var(--gold);font-family:'DM Mono',monospace;font-size:12px;min-width:36px;">${escapeHtml(loc.shortName)}</span>
+      <span style="color:var(--text-primary);font-size:14px;flex:1;">${escapeHtml(loc.name)}</span>
+      <span style="color:var(--text-muted);font-size:11px;text-transform:uppercase;">${escapeHtml(loc.side || '')}</span>
+      ${owner ? `
+        <button class="settings-btn loc-move-up-btn" data-loc-id="${escapeHtml(loc.id)}" ${idx === 0 ? 'disabled style="opacity:0.3"' : ''} title="Move up">↑</button>
+        <button class="settings-btn loc-move-down-btn" data-loc-id="${escapeHtml(loc.id)}" ${idx === locations.length - 1 ? 'disabled style="opacity:0.3"' : ''} title="Move down">↓</button>
+        ${!loc.isDefault ? `<button class="settings-btn settings-btn--danger loc-delete-btn" data-loc-id="${escapeHtml(loc.id)}" data-loc-name="${escapeHtml(loc.name)}">Delete</button>` : ''}
+      ` : ''}
+    </div>`).join('');
+
+  // Wire reorder buttons
+  if (owner) {
+    container.querySelectorAll('.loc-move-up-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const locId = btn.dataset.locId;
+        const locs = getProductionLocations();
+        const curIdx = locs.findIndex(l => l.id === locId);
+        if (curIdx <= 0) return;
+        const ids = locs.map(l => l.id);
+        [ids[curIdx - 1], ids[curIdx]] = [ids[curIdx], ids[curIdx - 1]];
+        try {
+          await reorderLocations(pid, ids);
+          toast('Location moved.', 'success');
+          setTimeout(() => loadSettingsLocations(), 300);
+        } catch (e) { toast('Failed to reorder.', 'error'); }
+      });
+    });
+
+    container.querySelectorAll('.loc-move-down-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const locId = btn.dataset.locId;
+        const locs = getProductionLocations();
+        const curIdx = locs.findIndex(l => l.id === locId);
+        if (curIdx < 0 || curIdx >= locs.length - 1) return;
+        const ids = locs.map(l => l.id);
+        [ids[curIdx], ids[curIdx + 1]] = [ids[curIdx + 1], ids[curIdx]];
+        try {
+          await reorderLocations(pid, ids);
+          toast('Location moved.', 'success');
+          setTimeout(() => loadSettingsLocations(), 300);
+        } catch (e) { toast('Failed to reorder.', 'error'); }
+      });
+    });
+
+    container.querySelectorAll('.loc-delete-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!confirmDialog(`Delete location "${btn.dataset.locName}"? Items using this location will need reassignment.`)) return;
+        try {
+          await deleteLocation(pid, btn.dataset.locId);
+          toast('Location deleted.', 'success');
+          setTimeout(() => loadSettingsLocations(), 300);
+        } catch (e) { toast('Failed to delete.', 'error'); }
+      });
+    });
+  }
+}
+
+function showAddLocationForm(productionId) {
+  const container = document.getElementById('settings-locations-list');
+  if (!container) return;
+
+  // Check if form already exists
+  if (document.getElementById('settings-add-loc-form')) return;
+
+  const form = document.createElement('div');
+  form.id = 'settings-add-loc-form';
+  form.style.cssText = 'padding:12px;background:var(--bg-raised);border:1px solid var(--bg-border);border-radius:8px;margin-top:10px;';
+  form.innerHTML = `
+    <div style="font-size:13px;color:var(--gold);margin-bottom:8px;font-weight:600;">New Location</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+      <input type="text" id="new-loc-name" class="form-input" placeholder="Name (e.g. Balcony)" maxlength="50" style="flex:1;min-width:120px;" />
+      <input type="text" id="new-loc-short" class="form-input" placeholder="Short (e.g. BAL)" maxlength="8" style="width:80px;" />
+      <select id="new-loc-side" class="form-select" style="width:100px;">
+        <option value="left">Left</option>
+        <option value="center">Center</option>
+        <option value="right">Right</option>
+        <option value="other">Other</option>
+      </select>
+      <button class="settings-btn settings-btn--primary" id="new-loc-save">Add</button>
+      <button class="settings-btn" id="new-loc-cancel">Cancel</button>
+    </div>
+  `;
+
+  container.parentElement.insertBefore(form, container.parentElement.querySelector('#settings-add-location-btn')?.nextSibling || null);
+
+  form.querySelector('#new-loc-cancel').addEventListener('click', () => form.remove());
+  form.querySelector('#new-loc-save').addEventListener('click', async () => {
+    const name = form.querySelector('#new-loc-name').value.trim();
+    const shortName = form.querySelector('#new-loc-short').value.trim().toUpperCase();
+    const side = form.querySelector('#new-loc-side').value;
+
+    if (!name) { toast('Location name is required.', 'error'); return; }
+    if (!shortName) { toast('Short name is required.', 'error'); return; }
+
+    const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const locs = getProductionLocations();
+    const sortOrder = locs.length > 0 ? Math.max(...locs.map(l => l.sortOrder || 0)) + 1 : 1;
+
+    try {
+      await saveLocation(productionId, { id, name, shortName, side, sortOrder, isDefault: false });
+      toast('Location added!', 'success');
+      form.remove();
+      setTimeout(() => loadSettingsLocations(), 300);
+    } catch (e) {
+      toast('Failed to add location.', 'error');
+    }
+  });
 }
 
 async function loadSettingsMembers() {

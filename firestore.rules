@@ -78,6 +78,30 @@ service cloud.firestore {
       match /checkState/{uid} {
         allow read, write: if request.auth.uid == uid && isMember(productionId);
       }
+      // Venue locations
+      match /locations/{locationId} {
+        allow read: if isMember(productionId) || isSuperAdmin();
+        allow create, update, delete: if isOwner(productionId) || isSuperAdmin();
+      }
+      // Actor cues
+      match /actorCues/{docId} {
+        allow read: if isMember(productionId) || isSuperAdmin();
+        allow create, update, delete: if isOwner(productionId) || isSuperAdmin();
+      }
+      // Scenic pieces and cue groups
+      match /scenicPieces/{pieceId} {
+        allow read: if isMember(productionId) || isSuperAdmin();
+        allow create, update, delete: if isOwner(productionId) || isSuperAdmin();
+      }
+      match /scenicCueGroups/{groupId} {
+        allow read: if isMember(productionId) || isSuperAdmin();
+        allow create, update, delete: if isOwner(productionId) || isSuperAdmin();
+      }
+      // Costumes
+      match /costumes/{costumeId} {
+        allow read: if isMember(productionId) || isSuperAdmin();
+        allow create, update, delete: if isOwner(productionId) || isSuperAdmin();
+      }
     }
   }
 }

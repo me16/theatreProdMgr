@@ -1133,7 +1133,7 @@ function renderCuesPanel() {
   const cueRows = scriptCues.map(c => {
     return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #2e2c29;"><span style="font-family:\'DM Mono\',monospace;font-size:11px;color:#5c5850;min-width:40px;">p.' + c.page + '</span><span class="cue-type-badge cue-type-badge--' + escapeHtml(c.type) + '">' + escapeHtml(c.type) + '</span><span style="flex:1;font-size:13px;color:#e8e4dc;">' + escapeHtml(c.label || '') + '</span>' + (owner ? '<button class="panel-btn cue-edit-btn" data-id="' + escapeHtml(c.id) + '">Edit</button><button class="panel-btn panel-btn--danger cue-delete-btn" data-id="' + escapeHtml(c.id) + '">Delete</button>' : '') + '</div>';
   }).join('') || '<div style="color:#5c5850;font-size:13px;padding:12px 0;">No cues added yet.</div>';
-  panel.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;"><h3 style="font-family:\'Instrument Serif\',serif;font-size:20px;color:#c8a96e;">Script Cues</h3><div style="display:flex;gap:6px;">' + (owner ? '<button class="settings-btn" id="ln-cue-import-btn">Import JSON</button>' : '') + '<button class="settings-btn" id="ln-cue-export-btn">Export CSV</button></div></div><div id="ln-cue-list">' + cueRows + '</div>' + (owner ? '<div style="margin-top:24px;padding:20px;background:#1a1916;border:1px solid #2e2c29;border-radius:10px;"><h4 style="font-size:14px;color:#c8a96e;margin-bottom:12px;" id="cue-form-title">Add Cue</h4><div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;"><input class="form-input" id="cue-page-input" type="number" min="1" placeholder="Page" style="width:70px;" /><select class="form-select" id="cue-type-select">' + CUE_TYPES.map(t => '<option value="' + t + '">' + t + '</option>').join('') + '</select><input class="form-input" id="cue-label-input" type="text" maxlength="100" placeholder="Label (e.g. LX 42)" style="flex:1;min-width:150px;" /></div><div style="display:flex;gap:8px;"><button class="modal-btn-primary" id="cue-save-btn">Add Cue</button><button class="modal-btn-cancel" id="cue-cancel-btn" style="display:none;">Cancel</button></div><input type="hidden" id="cue-edit-id" value="" /></div>' : '') + '<div style="margin-top:32px;"><h3 style="font-family:\'Instrument Serif\',serif;font-size:20px;color:#c8a96e;margin-bottom:12px;">Diagrams</h3>' + (owner ? '<button class="settings-btn settings-btn--primary" id="ln-diagrams-btn">Manage Diagrams</button>' : '') + '<div id="ln-diagrams-list" style="margin-top:12px;"></div></div>';
+  panel.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;"><h3 style="font-family:\'Instrument Serif\',serif;font-size:20px;color:#c8a96e;">Script Cues</h3><div style="display:flex;gap:6px;">' + (owner ? '<button class="settings-btn" id="ln-cue-import-btn">Import JSON</button>' : '') + '<button class="settings-btn" id="ln-cue-export-btn">Export CSV</button></div></div><div id="ln-cue-list">' + cueRows + '</div>' + (owner ? '<div style="margin-top:24px;padding:20px;background:#1a1916;border:1px solid #2e2c29;border-radius:10px;"><h4 style="font-size:14px;color:#c8a96e;margin-bottom:12px;" id="cue-form-title">Add Cue</h4><div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;"><input class="form-input" id="cue-page-input" type="number" min="1" placeholder="Page" style="width:70px;" /><select class="form-select" id="cue-type-select">' + CUE_TYPES.map(t => '<option value="' + t + '">' + t + '</option>').join('') + '</select><input class="form-input" id="cue-label-input" type="text" maxlength="100" placeholder="Label (e.g. LX 42)" style="flex:1;min-width:150px;" /></div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;"><input class="form-input" id="cue-desc-input" type="text" maxlength="200" placeholder="Description (optional)" style="flex:1;min-width:200px;" /><label style="font-size:11px;color:#888;margin-left:4px;">Margin:</label><select class="form-select" id="cue-side-select" style="width:80px;" title="Which margin of the page to show this cue"><option value="left">Left</option><option value="right">Right</option></select><label style="font-size:11px;color:#888;margin-left:4px;">Position:</label><input class="form-input" id="cue-y-input" type="number" min="0" max="100" step="1" placeholder="Y%" style="width:55px;" title="Vertical position on page margin (0%=top, 100%=bottom). Leave empty for auto-placement." /></div><div style="display:flex;gap:8px;"><button class="modal-btn-primary" id="cue-save-btn">Add Cue</button><button class="modal-btn-cancel" id="cue-cancel-btn" style="display:none;">Cancel</button></div><input type="hidden" id="cue-edit-id" value="" /></div>' : '') + '<div style="margin-top:32px;"><h3 style="font-family:\'Instrument Serif\',serif;font-size:20px;color:#c8a96e;margin-bottom:12px;">Diagrams</h3>' + (owner ? '<button class="settings-btn settings-btn--primary" id="ln-diagrams-btn">Manage Diagrams</button>' : '') + '<div id="ln-diagrams-list" style="margin-top:12px;"></div></div>';
   if (owner) {
     panel.querySelector('#cue-save-btn')?.addEventListener('click', saveCue);
     panel.querySelector('#cue-cancel-btn')?.addEventListener('click', cancelCueEdit);
@@ -1154,7 +1154,11 @@ async function saveCue() {
   if (!page || page < 1) { toast('Valid page number required.', 'error'); return; }
   if (!label) { toast('Label is required.', 'error'); return; }
   const pid = state.activeProduction.id;
-  const cueData = { page, half: '', type, label, zoneIdx: null, bounds: null, createdAt: serverTimestamp() };
+  const description = sanitizeName(document.getElementById('cue-desc-input')?.value || '');
+  const xSide = document.getElementById('cue-side-select')?.value || 'left';
+  const yPositionRaw = document.getElementById('cue-y-input')?.value;
+  const yPosition = yPositionRaw ? parseFloat(yPositionRaw) : null;
+  const cueData = { page, half: '', type, label, description, xSide, yPosition, zoneIdx: null, bounds: null, createdAt: serverTimestamp() };
   try {
     if (editId) { await updateDoc(doc(db, 'productions', pid, 'scriptCues', editId), cueData); toast('Cue updated.', 'success'); }
     else { await addDoc(collection(db, 'productions', pid, 'scriptCues'), cueData); toast('Cue added!', 'success'); }
@@ -1173,6 +1177,12 @@ function startCueEdit(cueId) {
   document.getElementById('cue-type-select').value = cue.type || 'OTHER';
   document.getElementById('cue-label-input').value = cue.label || '';
   document.getElementById('cue-edit-id').value = cueId;
+  const descEl = document.getElementById('cue-desc-input');
+  if (descEl) descEl.value = cue.description || '';
+  const sideEl = document.getElementById('cue-side-select');
+  if (sideEl) sideEl.value = cue.xSide || 'left';
+  const yEl = document.getElementById('cue-y-input');
+  if (yEl) yEl.value = cue.yPosition != null ? cue.yPosition : '';
   document.getElementById('cue-form-title').textContent = 'Edit Cue';
   document.getElementById('cue-save-btn').textContent = 'Update Cue';
   document.getElementById('cue-cancel-btn').style.display = '';
@@ -1181,6 +1191,12 @@ function cancelCueEdit() {
   document.getElementById('cue-page-input').value = '';
   document.getElementById('cue-label-input').value = '';
   document.getElementById('cue-edit-id').value = '';
+  const descEl = document.getElementById('cue-desc-input');
+  if (descEl) descEl.value = '';
+  const sideEl = document.getElementById('cue-side-select');
+  if (sideEl) sideEl.value = 'left';
+  const yEl = document.getElementById('cue-y-input');
+  if (yEl) yEl.value = '';
   document.getElementById('cue-form-title').textContent = 'Add Cue';
   document.getElementById('cue-save-btn').textContent = 'Add Cue';
   document.getElementById('cue-cancel-btn').style.display = 'none';

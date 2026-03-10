@@ -80,6 +80,8 @@ export async function renderSettingsTab() {
         document.getElementById('app-prod-title').textContent = val;
         const ln = document.getElementById('ln-show-name');
         if (ln) ln.textContent = val;
+        const rs = document.getElementById('rs-show-name');
+        if (rs) rs.textContent = val;
         toast('Title updated.', 'success');
       } catch(e) { toast('Failed to save.', 'error'); }
     });

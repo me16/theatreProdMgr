@@ -430,6 +430,12 @@ function renderRunShowControls() {
   const container = document.getElementById('rs-controls');
   if (!container) return;
 
+  // Preserve scratchpad text before rebuilding DOM
+  const existingScratchpad = document.getElementById('rs-scratchpad');
+  if (existingScratchpad && state.runSession) {
+    state.runSession.scratchpad = existingScratchpad.value;
+  }
+
   const session = state.runSession;
   const elapsed = session?.timerElapsed || 0;
   const totalSec = (session?.timerDuration || 120) * 60;
@@ -526,6 +532,12 @@ function rsTickTimerDisplay() {
   const session = state.runSession;
   if (!session) return;
 
+  // Defensive: re-populate sidebar show name if it was cleared
+  const _sn = document.getElementById('rs-show-name');
+  if (_sn && !_sn.textContent && state.activeProduction?.title) {
+    _sn.textContent = state.activeProduction.title;
+  }
+
   const elapsed = session.timerElapsed || 0;
   const totalSec = (session.timerDuration || 120) * 60;
   const pct = totalSec > 0 ? Math.min(100, (elapsed / totalSec) * 100) : 0;
@@ -584,9 +596,11 @@ function renderStageColumnsHtml(page) {
     const warnPgs = state.runSession?.timerWarnPages || 5;
     const warn = r.upcomingEnter && (r.upcomingEnter - page) <= warnPgs && (r.upcomingEnter - page) > 0;
     const item = { prop: p, ...r, warn };
+    const loc = (r.location || '').toUpperCase().replace('STAGE LEFT','SL').replace('STAGE RIGHT','SR').replace('ON STAGE','ON').replace('ONSTAGE','ON');
     if (r.status === 'ON') onProps.push(item);
-    else if (r.location === 'SL') slProps.push(item);
-    else srProps.push(item);
+    else if (loc === 'SL') slProps.push(item);
+    else if (loc === 'SR') srProps.push(item);
+    else slProps.push(item); // Default unknown locations to SL
   });
 
   const renderCol = (items) => {
@@ -603,7 +617,9 @@ function renderStageColumnsHtml(page) {
         crossoverHtml = `<div class="prop-crossover-alert">⚠ Move ${escapeHtml(xo.from)}→${escapeHtml(xo.to)} · ${moverLabel}</div>`;
       }
       const wt = warn ? ` <span style="color:#d4af37;font-size:11px;">(pg ${ue})</span>` : '';
-      return `<div class="stage-prop ${warn ? 'stage-prop--warn' : ''} ${xo ? 'stage-prop--crossover' : ''}"><div class="prop-name">${escapeHtml(p.name)}${wt}</div>${carrier}${crossoverHtml}</div>`;
+      const safeName = p.name || p.id || '(unnamed)';
+      if (!p.name) console.warn('[CUE] Stage column prop has empty name:', p);
+      return `<div class="stage-prop ${warn ? 'stage-prop--warn' : ''} ${xo ? 'stage-prop--crossover' : ''}"><div class="prop-name">${escapeHtml(safeName)}${wt}</div>${carrier}${crossoverHtml}</div>`;
     }).join('');
   };
 
@@ -618,6 +634,12 @@ function renderStageColumnsHtml(page) {
    LEFT PANEL — SIDEBAR (notes + cast)
    ═══════════════════════════════════════════════════════════ */
 function renderRunShowSidebar() {
+  // Defensive: re-populate sidebar header if it was cleared
+  const _showNameEl = document.getElementById('rs-show-name');
+  if (_showNameEl && !_showNameEl.textContent && state.activeProduction?.title) {
+    _showNameEl.textContent = state.activeProduction.title;
+  }
+
   rsBuildFlatChars();
   const castList = document.getElementById('rs-cast-list');
   if (!castList) return;
@@ -1507,6 +1529,8 @@ function rsToggleSplitMode() {
 function rsHandleKeydown(e) {
   if (!document.getElementById('tab-runshow')?.classList.contains('tab-panel--active')) return;
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    // Fix 11 [UX-004]: Block keyboard nav when modals are open
+    if (document.querySelector('.modal-backdrop, .cast-modal.open, [class*="modal"].open, .prop-notes-modal, .prop-photo-lightbox')) return;
 
   if (rsPopoverOpen) {
     if (e.key === 'Enter') { rsConfirmNote(); return; }
@@ -1982,6 +2006,11 @@ function openEndRunModal() {
       const fab = document.getElementById('run-show-fab');
       if (fab) fab.classList.add('hidden');
       renderRunShowControls();
+      // Re-render current page to clear stale overlay and ensure navigation works
+      if (rsPdfDoc) {
+        rsCurrentRenderTask = null; // Clear any stale render reference
+        await rsRenderPage(rsCurrentPage);
+      }
       if (sid) await generateRunReport(sid);
       toast('Run session ended.', 'success');
     } catch(e) {
@@ -2115,7 +2144,23 @@ function openReportModal(title, html, sessionId) {
   const titleEl = document.getElementById('run-report-title');
   if (titleEl) titleEl.textContent = title || 'Run Report';
   const body = document.getElementById('run-report-body');
-  if (body) body.innerHTML = html;
+  if (body) {
+    // Render report in sandboxed iframe to prevent CSS style leaking
+    // into the main page (report HTML contains <style> tags with global selectors
+    // like body{color:#1a1814} that would override the dark theme text colors).
+    body.innerHTML = '';
+    const iframe = document.createElement('iframe');
+    iframe.srcdoc = html;
+    iframe.style.cssText = 'width:100%;border:none;background:#fff;border-radius:8px;min-height:400px;';
+    // Auto-resize iframe to content height once loaded
+    iframe.addEventListener('load', () => {
+      try {
+        const h = iframe.contentDocument?.documentElement?.scrollHeight;
+        if (h) iframe.style.height = h + 'px';
+      } catch(_e) { /* cross-origin safety */ }
+    });
+    body.appendChild(iframe);
+  }
   // Ensure header buttons are in report mode
   const printBtn = document.getElementById('run-report-print');
   const emailBtn = document.getElementById('run-report-email');
@@ -2127,7 +2172,16 @@ function openReportModal(title, html, sessionId) {
 function closeReportModal() {
   const modal = document.getElementById('run-report-modal');
   if (modal) modal.style.display = 'none';
+  // Clear report body to remove any <style> tags that could leak into the page
+  const body = document.getElementById('run-report-body');
+  if (body) body.innerHTML = '';
   _reportEmailMode = false;
+
+  // Refresh controls to restore any styles that were affected
+  renderRunShowControls();
+  // Re-populate sidebar title in case it was cleared by leaked styles
+  const showNameEl = document.getElementById('rs-show-name');
+  if (showNameEl) showNameEl.textContent = state.activeProduction?.title || '';
 }
 
 function printReport() {
@@ -2307,8 +2361,19 @@ function _restoreReportView() {
 
   const reportBody = document.getElementById('run-report-body');
   if (reportBody) {
-    reportBody.innerHTML = _currentReportHtml;
+    // Use iframe to prevent CSS leak (same as openReportModal)
+    reportBody.innerHTML = '';
     reportBody.style.background = '#fff';
+    const iframe = document.createElement('iframe');
+    iframe.srcdoc = _currentReportHtml;
+    iframe.style.cssText = 'width:100%;border:none;background:#fff;border-radius:8px;min-height:400px;';
+    iframe.addEventListener('load', () => {
+      try {
+        const h = iframe.contentDocument?.documentElement?.scrollHeight;
+        if (h) iframe.style.height = h + 'px';
+      } catch(_e) {}
+    });
+    reportBody.appendChild(iframe);
   }
 
   // Restore header buttons

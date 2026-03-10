@@ -137,6 +137,8 @@ async function openProduction(id, prod, role) {
     joinCode: prod.joinCode || '',
     joinCodeActive: prod.joinCodeActive !== false,
     createdBy: prod.createdBy || '',
+    scriptPageStartPage: prod.scriptPageStartPage || 1,
+    scriptPageStartHalf: prod.scriptPageStartHalf || '',
   };
   state.activeRole = (state.isSuperAdmin) ? 'owner' : role;
   hideDashboard();
@@ -144,6 +146,10 @@ async function openProduction(id, prod, role) {
 }
 
 export function backToDashboard() {
+  // Stop any active timer before cleanup to prevent orphaned intervals
+  import('../props/props.js').then(m => m.stopTimer());
+  import('../shared/session-sync.js').then(m => m.stopSessionSync());
+
   cleanup();
   resetLineNotes();
   resetRunShow();

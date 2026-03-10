@@ -36,6 +36,7 @@ let _currentPage = 1;
 
 // Track which prop+enterPage combos have already fired a warn toast this cycle
 const _warnedProps = new Set();
+let _propsNotifyTimer = null; // debounce timer for props→RunShow notify
 
 const appView = document.getElementById('app-view');
 const content = document.getElementById('props-content');
@@ -207,6 +208,9 @@ function subscribeToProps() {
   const unsubProps = onSnapshot(collection(db, 'productions', pid, 'props'), snap => {
     props = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     renderContent();
+    // Notify Run Show to update stage columns — debounced to avoid mid-render conflicts
+    if (typeof _propsNotifyTimer !== 'undefined') clearTimeout(_propsNotifyTimer);
+    _propsNotifyTimer = setTimeout(() => _notifyRunShow(), 50);
   });
   const unsubNotes = onSnapshot(collection(db, 'productions', pid, 'propNotes'), snap => {
     propNotes = {};
@@ -221,6 +225,8 @@ function subscribeToProps() {
 
 function renderContent() {
   if (!document.getElementById('tab-props')?.classList.contains('tab-panel--active')) return;
+  // Skip manage tab re-render if user is actively editing a prop (prevents input loss)
+  if (activeTab === 'manage' && editingPropId) return;
   switch (activeTab) {
     case 'manage': renderManageTab(); break;
     case 'view': renderViewTab(); break;
@@ -759,9 +765,10 @@ export async function startRunSession(sessionTitle, totalPages, durationMin, war
 
   // 3. Start the timer immediately
   startTimer(totalPages, durationMin);
-}
+
   // P0: Start periodic Firestore sync
   startSessionSync();
+}
 
 /**
  * End the active run session.
@@ -770,19 +777,36 @@ export async function startRunSession(sessionTitle, totalPages, durationMin, war
 export async function endRunSession(scratchpadText) {
   if (!state.runSession) return;
 
-  stopTimer();
-
-  // P0: Stop sync and write final state
-  stopSessionSync();
-  await syncSessionToFirestore();
-  hideHeartbeat();
-
+  // Capture session data BEFORE clearing state
   const sid = state.runSession.sessionId;
   const pid = state.activeProduction.id;
   const elapsed = state.runSession.timerElapsed;
   const holdLog = state.runSession.holdLog || [];
   const totalHold = holdLog.reduce((s, h) => s + (h.durationSeconds || 0), 0);
 
+  // P0: Stop sync FIRST (before clearing session)
+  stopSessionSync();
+  await syncSessionToFirestore();
+
+  // Clear the timer interval without triggering re-renders via _notifyRunShow
+  const iv = getTimerState().timerInterval;
+  if (iv) { clearInterval(iv); setTimerField('timerInterval', null); }
+
+  // Null out session BEFORE any UI can re-render
+  state.runSession = null;
+
+  // Clean up timer state that stopTimer() normally handles
+  _warnedProps.clear();
+  _timerRunning = false;
+  _timerHeld = false;
+  _timerElapsed = 0;
+
+  hideHeartbeat();
+
+  // Signal Run Show to render idle mode now that session is null
+  _notifyRunShow();
+
+  // Now write the final state to Firestore
   // Security rule note: sessions update restricted to creator (createdBy == uid) or owner role
   await updateDoc(doc(db, 'productions', pid, 'sessions', sid), {
     endedAt: serverTimestamp(),
@@ -792,8 +816,6 @@ export async function endRunSession(scratchpadText) {
     scratchpadNotes: scratchpadText || '',
     status: 'ended',
   });
-
-  state.runSession = null;
 }
 
 /* ======================== PROP NOTES MODAL ======================== */

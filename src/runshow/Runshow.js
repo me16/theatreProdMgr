@@ -1684,6 +1684,15 @@ async function confirmFabNote() {
 
 
 
+/** Open a mailto: URI via hidden iframe to avoid popup blockers. */
+function _openMailto(uri) {
+  const frame = document.createElement('iframe');
+  frame.style.display = 'none';
+  frame.src = uri;
+  document.body.appendChild(frame);
+  setTimeout(() => frame.remove(), 4000);
+}
+
 /* ═══════════════════════════════════════════════════════════
    FEATURE 7: PER-ACTOR EMAIL NOTES (revised)
    ═══════════════════════════════════════════════════════════ */
@@ -1839,8 +1848,8 @@ function rsOpenEmailNotes() {
       actorsWithEmail.forEach(([cid, data]) => {
         const body = _buildActorEmailBody(data.actorName, data.notes, show, dateStr);
         const uri = _buildMailtoUri(data.actorEmail, subject, body);
-        setTimeout(() => { window.open(uri, '_blank'); }, delay);
-        delay += 300;
+        setTimeout(() => { _openMailto(uri); }, delay);
+        delay += 600;
       });
       toast('Opening ' + actorsWithEmail.length + ' email' + (actorsWithEmail.length !== 1 ? 's' : '') + '\u2026');
     });
@@ -1848,7 +1857,7 @@ function rsOpenEmailNotes() {
 
   // Per-actor email buttons
   emailModal.querySelectorAll('.email-single-btn:not(.email-open-btn--disabled)').forEach(btn => {
-    btn.addEventListener('click', () => { window.open(btn.dataset.mailto, '_blank'); });
+    btn.addEventListener('click', () => { _openMailto(btn.dataset.mailto); });
   });
 
   // Per-actor copy buttons
@@ -2267,8 +2276,8 @@ async function emailReport() {
       actorsWithEmail.forEach(([cid, data]) => {
         const mbody = _buildActorEmailBody(data.actorName, data.notes, show, dateStr);
         const uri = _buildMailtoUri(data.actorEmail, subject, mbody);
-        setTimeout(() => { window.open(uri, '_blank'); }, delay);
-        delay += 300;
+        setTimeout(() => { _openMailto(uri); }, delay);
+        delay += 600;
       });
       toast('Opening ' + actorsWithEmail.length + ' email' + (actorsWithEmail.length !== 1 ? 's' : '') + '\u2026');
     });
@@ -2279,7 +2288,7 @@ async function emailReport() {
     reportBody.querySelectorAll('.email-single-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const uri = btn.dataset.mailto;
-        if (uri) window.open(uri, '_blank');
+        if (uri) _openMailto(uri);
       });
     });
 

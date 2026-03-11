@@ -78,6 +78,7 @@ let rsDiagramZoomLevel = 1;
 // Cue margin state
 let rsSelectedCue = null;
 let rsDiagramPanelMode = 'diagrams'; // 'diagrams' | 'cues'
+let rsShowActorPills = false;         // toggle actor name pills on assigned zones
 
 // Timer-driven page tracking — last script page the timer navigated to
 let rsLastTimerScriptPage = 0;
@@ -262,6 +263,14 @@ export function initRunShow() {
 
   // Feature 7: Email Notes button
   document.getElementById('rs-email-notes-btn')?.addEventListener('click', rsOpenEmailNotes);
+  document.getElementById('rs-toggle-actor-pills')?.addEventListener('click', () => {
+    rsShowActorPills = !rsShowActorPills;
+    const btn = document.getElementById('rs-toggle-actor-pills');
+    if (btn) btn.classList.toggle('ln-header-btn--active', rsShowActorPills);
+    if (rsPdfDoc) rsRedrawOverlay(rsCurrentPage);
+  });
+
+
 
   // Feature 4: Diagram panel toggle
   document.getElementById('rs-diagram-toggle')?.addEventListener('click', () => {
@@ -1351,6 +1360,18 @@ function rsRenderLineZones(zKey) {
     label.className = 'zone-label';
     label.textContent = zone.text ? zone.text.substring(0, 40) : `zone ${idx}`;
     div.appendChild(label);
+    // Actor pill (when toggled on and zone has assignment)
+    if (rsShowActorPills && zone.assignedCharName) {
+      const cast = getCastMembers();
+      const member = cast.find(m => m.id === zone.assignedCastId);
+      const pillColor = member?.color || '#5b9bd4';
+      const pill = document.createElement('span');
+      pill.className = 'rs-actor-pill';
+      pill.style.background = pillColor;
+      pill.style.color = '#fff';
+      pill.textContent = zone.assignedCharName;
+      div.appendChild(pill);
+    }
     hitOverlay.appendChild(div);
   });
 }

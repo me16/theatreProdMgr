@@ -633,6 +633,16 @@ function zeRenderZones() {
     label.textContent = zone.text ? zone.text.substring(0, 50) : `[zone ${idx}]`;
     div.appendChild(label);
 
+    if (zone.assignedCharName) {
+      const ab = document.createElement('span');
+      ab.className = 'ze-zone-actor-badge';
+      ab.textContent = zone.assignedCharName;
+      const _cast = getCastMembers();
+      const _member = _cast.find(m => m.id === zone.assignedCastId);
+      ab.style.background = _member?.color || '#5b9bd4';
+      div.appendChild(ab);
+    }
+
     const handle = document.createElement('div');
     handle.className = 'ze-resize'; handle.dataset.idx = idx;
     div.appendChild(handle);
@@ -792,6 +802,28 @@ function zePopulateDetail(idx, focusText = false) {
   const cn = getValue('zd-charname'); if (cn) cn.checked = !!z.isCharName;
   const sd = getValue('zd-stagedir'); if (sd) sd.checked = !!z.isStageDirection;
   const ml = getValue('zd-musicline'); if (ml) ml.checked = !!z.isMusicLine;
+  // Actor assignment dropdown
+  const actorSelect = document.getElementById('zd-actor');
+  const actorSection = document.getElementById('zd-actor-section');
+  if (actorSelect && actorSection) {
+    // Hide for charName/stageDir zones, show for dialogue/music
+    actorSection.style.display = (z.isCharName || z.isStageDirection) ? 'none' : '';
+    const cast = getCastMembers();
+    let opts = '<option value="">— none —</option>';
+    cast.forEach(m => {
+      const chars = m.characters?.length > 0 ? m.characters : [m.name];
+      chars.forEach(ch => {
+        const val = m.id + '::' + ch;
+        const sel = (m.id === z.assignedCastId && ch === z.assignedCharName) ? ' selected' : '';
+        opts += '<option value="' + escapeHtml(val) + '"' + sel + '>' + escapeHtml(ch) + ' (' + escapeHtml(m.name) + ')</option>';
+      });
+    });
+    actorSelect.innerHTML = opts;
+    // Explicitly set value — innerHTML + selected attribute is unreliable in some browsers
+    if (z.assignedCastId && z.assignedCharName) {
+      actorSelect.value = z.assignedCastId + '::' + z.assignedCharName;
+    }
+  }
   if (focusText && t) requestAnimationFrame(() => { t.focus(); t.select(); });
 }
 
@@ -809,6 +841,18 @@ function zeApplyDetail() {
   if (z.isCharName) { z.isStageDirection = false; z.isMusicLine = false; }
   if (z.isStageDirection) { z.isCharName = false; z.isMusicLine = false; }
   if (z.isMusicLine) { z.isCharName = false; z.isStageDirection = false; }
+  // Actor assignment
+  const actorVal = document.getElementById('zd-actor')?.value || '';
+  if (actorVal) {
+    const [cid, cname] = actorVal.split('::');
+    z.assignedCastId = cid;
+    z.assignedCharName = cname;
+  } else {
+    z.assignedCastId = null;
+    z.assignedCharName = null;
+  }
+  // Clear actor if zone is charName or stageDir
+  if (z.isCharName || z.isStageDirection) { z.assignedCastId = null; z.assignedCharName = null; }
   zeRenderZones(); zeUpdateListPanel(); zeSelectZone(zeSelectedIdx); debounceSaveZones();
   toast('Zone updated');
 }

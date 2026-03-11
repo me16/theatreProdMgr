@@ -1171,6 +1171,25 @@
     .ze-select-all-drag-btn:disabled { opacity: 0.35; cursor: not-allowed; }
     #ze-saved-badge.visible { opacity: 1; }
 
+    /* Actor assignment pill on zones — left-pinned, opaque */
+    .ze-zone-actor-badge {
+      position: absolute; left: -3px; top: 50%; transform: translate(-100%, -50%);
+      font-family: 'DM Mono', monospace; font-size: 9px; font-weight: 600;
+      padding: 1px 6px; border-radius: 3px; line-height: 15px;
+      color: #fff; pointer-events: none; white-space: nowrap;
+      max-width: 100px; overflow: hidden; text-overflow: ellipsis;
+      z-index: 6;
+    }
+
+    /* Run Show actor pill on line zones — opaque */
+    .rs-actor-pill {
+      position: absolute; left: -3px; top: 50%; transform: translate(-100%, -50%);
+      font-family: 'DM Mono', monospace; font-size: 9px; font-weight: 600;
+      padding: 1px 6px; border-radius: 3px; line-height: 15px;
+      white-space: nowrap; pointer-events: none; z-index: 4;
+      max-width: 100px; overflow: hidden; text-overflow: ellipsis;
+    }
+
     /* Zone editor list items */
     .ze-list-item {
       display: flex; align-items: flex-start; gap: 8px; padding: 7px 8px;
@@ -1342,6 +1361,7 @@
               <span class="show-name" id="rs-show-name"></span>
                 <span class="heartbeat-dot" id="rs-heartbeat-dot" title="Session syncing"></span>
               <div style="margin-left:auto;display:flex;gap:6px;">
+                <button class="ln-header-btn" id="rs-toggle-actor-pills" title="Show/hide actor labels on script lines">Actors</button>
                 <button class="ln-header-btn" id="rs-email-notes-btn">Email Notes</button>
                 <button class="ln-header-btn" id="rs-send-btn">Send Notes</button>
               </div>
@@ -1581,6 +1601,12 @@
               <input type="checkbox" id="zd-musicline" style="accent-color:#4ecdc4;">
               <span style="font-family:'DM Mono',monospace;font-size:11px;color:var(--text-secondary);">Music line <kbd>M</kbd></span>
             </label>
+            <div style="margin-bottom:10px;" id="zd-actor-section">
+              <div class="ze-label">Assign Actor</div>
+              <select class="ze-input" id="zd-actor" style="font-size:11px;padding:4px 6px;">
+                <option value="">— none —</option>
+              </select>
+            </div>
             <div style="display:flex;gap:6px;justify-content:flex-end;">
               <button class="ze-tool-btn ze-danger" id="ze-btn-del-zone">Delete Zone</button>
               <button class="ze-tool-btn ze-accent" id="ze-btn-apply">Apply</button>

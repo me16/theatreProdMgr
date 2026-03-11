@@ -4,7 +4,7 @@ import { isOwner } from '../shared/roles.js';
 import { toast } from '../shared/toast.js';
 import { escapeHtml, sanitizeName, confirmDialog } from '../shared/ui.js';
 import {
-  collection, doc, addDoc, updateDoc, deleteDoc, onSnapshot,
+  collection, doc, addDoc, updateDoc, deleteDoc, onSnapshot, getDocs,
   serverTimestamp
 } from 'firebase/firestore';
 
@@ -76,20 +76,21 @@ export function renderCastTab() {
       tableHtml += `<div style="margin-bottom:28px;">
         <div style="font-size:11px;text-transform:uppercase;letter-spacing:2px;color:var(--text-muted);margin-bottom:10px;">${escapeHtml(type)}</div>
         <table class="cast-table">
-          <thead><tr><th>Name</th><th>Email</th><th>Characters</th>${owner ? '<th></th>' : ''}</tr></thead>
+          <thead><tr><th>Name</th><th>Email</th><th>Characters</th><th></th></tr></thead>
           <tbody>
             ${members.map(m => {
               const chars = (m.characters || []).map(ch =>
                 `<span class="char-chip"><span class="char-chip-dot" style="background:${escapeHtml(m.color || '#888')}"></span>${escapeHtml(ch)}</span>`
               ).join('');
-              return `<tr>
+              return `<tr data-member-id="${escapeHtml(m.id)}">
                 <td class="cast-member-name">${escapeHtml(m.name)}</td>
                 <td class="cast-member-email">${escapeHtml(m.email || '')}</td>
                 <td><div class="cast-characters">${chars || '<span style="color:var(--text-muted);font-size:12px;">—</span>'}</div></td>
                 ${owner ? `<td class="cast-actions">
                   <button class="cast-action-btn" data-action="edit" data-id="${escapeHtml(m.id)}">Edit</button>
                   <button class="cast-action-btn cast-action-btn--danger" data-action="remove" data-id="${escapeHtml(m.id)}">Remove</button>
-                </td>` : ''}
+                  <button class="cast-lines-btn" data-lines-id="${escapeHtml(m.id)}" style="font-size:10px;padding:3px 8px;background:var(--bg-raised);border:1px solid var(--bg-border);color:var(--text-secondary);border-radius:4px;cursor:pointer;font-family:'DM Mono',monospace;" title="View assigned script lines">Lines</button>
+                </td>` : `<td><button class="cast-lines-btn" data-lines-id="${escapeHtml(m.id)}" style="font-size:10px;padding:3px 8px;background:var(--bg-raised);border:1px solid var(--bg-border);color:var(--text-secondary);border-radius:4px;cursor:pointer;font-family:'DM Mono',monospace;" title="View assigned script lines">Lines</button></td>`}
               </tr>`;
             }).join('')}
           </tbody>
@@ -123,6 +124,113 @@ export function renderCastTab() {
       })
     );
   }
+
+  // Lines button handler — all users, not just owners
+  container.querySelectorAll('.cast-lines-btn').forEach(btn => {
+    btn.addEventListener('click', () => showActorLineReport(btn.dataset.linesId));
+  });
+}
+
+/**
+ * Build a line report for a single cast member.
+ * Reads all zone documents, filters for zones assigned to the given castId,
+ * groups by page, and returns { pageKey: string, lines: string[] }[].
+ */
+async function buildActorLineReport(castId, charNames) {
+  const pid = state.activeProduction?.id;
+  if (!pid) return [];
+  try {
+    const zonesSnap = await getDocs(collection(db, 'productions', pid, 'zones'));
+    const pages = [];
+    zonesSnap.docs.forEach(docSnap => {
+      const pageKey = docSnap.id;
+      const zones = docSnap.data().zones || [];
+      const matching = zones.filter(z =>
+        z.assignedCastId === castId && charNames.includes(z.assignedCharName)
+        && !z.isCharName && !z.isStageDirection
+      );
+      if (matching.length > 0) {
+        pages.push({
+          pageKey,
+          lines: matching.map(z => z.text || '[no text]')
+        });
+      }
+    });
+    // Sort by page number (numeric part)
+    pages.sort((a, b) => {
+      const numA = parseInt(a.pageKey) || 0;
+      const numB = parseInt(b.pageKey) || 0;
+      if (numA !== numB) return numA - numB;
+      return a.pageKey.localeCompare(b.pageKey);
+    });
+    return pages;
+  } catch (e) {
+    console.error('Failed to build actor line report:', e);
+    return [];
+  }
+}
+
+/**
+ * Render the line report modal/section for a cast member.
+ */
+async function showActorLineReport(memberId) {
+  const member = castMembers.find(m => m.id === memberId);
+  if (!member) return;
+  const charNames = member.characters?.length > 0 ? member.characters : [member.name];
+
+  // Show loading state
+  const container = document.getElementById('cast-content');
+  if (!container) return;
+  const reportId = 'cast-line-report-' + memberId;
+  let reportEl = document.getElementById(reportId);
+  if (reportEl) { reportEl.remove(); return; } // toggle off
+
+  // Create report container
+  reportEl = document.createElement('div');
+  reportEl.id = reportId;
+  reportEl.className = 'cast-line-report';
+  reportEl.style.cssText = 'background:var(--bg-raised);border:1px solid var(--bg-border);border-radius:8px;padding:16px;margin:8px 0 16px;';
+  reportEl.innerHTML = '<div style="color:var(--text-muted);font-size:12px;font-family:\'DM Mono\',monospace;">Loading line report\u2026</div>';
+
+  // Insert after the member's row (find the <tr> with data-member-id, then after its parent table group)
+  const memberRow = container.querySelector('[data-member-id="' + memberId + '"]');
+  const groupDiv = memberRow?.closest('div[style]');
+  if (groupDiv) groupDiv.after(reportEl);
+  else container.appendChild(reportEl);
+
+  const pages = await buildActorLineReport(memberId, charNames);
+
+  if (pages.length === 0) {
+    reportEl.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:4px 0;">No lines assigned to ' + escapeHtml(member.name) + ' yet. Assign lines in the Edit Script tab.</div>';
+    return;
+  }
+
+  const totalLines = pages.reduce((sum, p) => sum + p.lines.length, 0);
+  let html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">'
+    + '<span style="font-family:\'DM Mono\',monospace;font-size:11px;color:var(--gold);">'
+    + totalLines + ' line' + (totalLines !== 1 ? 's' : '') + ' across ' + pages.length + ' page' + (pages.length !== 1 ? 's' : '')
+    + '</span>'
+    + '<button class="ln-header-btn" data-close-report="' + escapeHtml(memberId) + '" style="font-size:10px;">Close</button></div>';
+
+  pages.forEach(p => {
+    html += '<details class="cast-line-page-group" style="margin-bottom:6px;">'
+      + '<summary style="cursor:pointer;font-family:\'DM Mono\',monospace;font-size:12px;color:var(--text-primary);padding:4px 0;user-select:none;">'
+      + '<span style="color:var(--gold);">p.' + escapeHtml(p.pageKey) + '</span>'
+      + ' \u00b7 ' + p.lines.length + ' line' + (p.lines.length !== 1 ? 's' : '')
+      + '</summary>'
+      + '<div style="padding:4px 0 8px 16px;">';
+    p.lines.forEach(line => {
+      html += '<div style="font-size:12px;color:var(--text-secondary);padding:2px 0;border-left:2px solid ' + escapeHtml(member.color || '#5b9bd4') + ';padding-left:8px;margin-bottom:3px;">'
+        + escapeHtml(line.length > 120 ? line.slice(0, 120) + '\u2026' : line)
+        + '</div>';
+    });
+    html += '</div></details>';
+  });
+
+  reportEl.innerHTML = html;
+
+  // Wire close button
+  reportEl.querySelector('[data-close-report]')?.addEventListener('click', () => reportEl.remove());
 }
 
 function openCastModal(member) {

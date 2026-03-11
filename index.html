@@ -620,6 +620,9 @@
     .line-zone--char { background: rgba(91,155,212,0.08); }
     .line-zone--stage-dir { background: rgba(128,128,128,0.06); }
     .line-zone--has-note { border-bottom: 2px solid; }
+    .line-zone--music { background: rgba(78,205,196,0.12); border-left: 3px solid rgba(78,205,196,0.6); }
+    .line-zone--music:hover { background: rgba(78,205,196,0.22) !important; outline-color: rgba(78,205,196,0.5); }
+    .line-zone--music .zone-label { color: rgba(78,205,196,0.8); }
     .note-type-tag {
       position: absolute; right: -34px; top: 50%; transform: translateY(-50%);
       font-family: 'DM Mono', monospace; font-size: 9px; padding: 1px 4px;
@@ -1115,6 +1118,10 @@
     .ze-zone.ze-stage-dir { border-color: rgba(196,92,74,0.45); background: rgba(196,92,74,0.06); cursor: default; }
     .ze-zone.ze-stage-dir:hover { background: rgba(196,92,74,0.12); border-color: rgba(196,92,74,0.7); }
     .ze-zone.ze-stage-dir .ze-zone-label { color: rgba(196,92,74,0.7); }
+    .ze-zone.ze-music-line { border-color: rgba(78,205,196,0.5); background: rgba(78,205,196,0.06); }
+    .ze-zone.ze-music-line:hover { background: rgba(78,205,196,0.15); border-color: rgba(78,205,196,0.9); }
+    .ze-zone.selected.ze-music-line { border-color: #4ecdc4; }
+    .ze-zone.ze-music-line .ze-zone-label { color: rgba(78,205,196,0.7); }
     .ze-zone.ze-multi-selected { background: rgba(91,155,212,0.18); border-color: #5b9bd4; border-width: 1.5px; }
     .ze-zone-label {
       font-family: 'DM Mono', monospace; font-size: 7.5px; color: rgba(200,169,110,0.75);
@@ -1174,6 +1181,8 @@
     .ze-list-item.selected { background: var(--bg-raised); border-left: 2px solid #c8a96e; padding-left: 6px; }
     .ze-list-item.ze-cn-item { border-left: 2px solid rgba(91,155,212,0.4); padding-left: 6px; }
     .ze-list-item.ze-cn-item.selected { border-left-color: #5b9bd4; }
+    .ze-list-item.ze-ml-item { border-left: 2px solid rgba(78,205,196,0.4); padding-left: 6px; }
+    .ze-list-item.ze-ml-item.selected { border-left-color: #4ecdc4; }
     .ze-list-item.ze-multi-selected { background: rgba(91,155,212,0.08); border-left: 2px solid #5b9bd4; padding-left: 6px; }
     .ze-item-idx { font-family: 'DM Mono', monospace; font-size: 10px; color: var(--text-muted); flex-shrink: 0; min-width: 22px; padding-top: 1px; }
     .ze-item-body { flex: 1; min-width: 0; }
@@ -1541,6 +1550,7 @@
             <span id="ze-multi-count" style="font-family:'DM Mono',monospace;font-size:11px;color:#5b9bd4;flex:1;"></span>
             <button class="ze-tool-btn" id="ze-btn-multi-char">Char Name <kbd>C</kbd></button>
             <button class="ze-tool-btn" id="ze-btn-multi-dir">Stage Dir <kbd>S</kbd></button>
+            <button class="ze-tool-btn" id="ze-btn-multi-music">Music <kbd>M</kbd></button>
             <button class="ze-tool-btn ze-danger" id="ze-btn-multi-del">Delete All</button>
             <button class="ze-tool-btn" id="ze-btn-multi-clear">✕</button>
           </div>
@@ -1566,6 +1576,10 @@
             <label style="display:flex;align-items:center;gap:7px;margin-bottom:10px;cursor:pointer;">
               <input type="checkbox" id="zd-stagedir" style="accent-color:#5b9bd4;">
               <span style="font-family:'DM Mono',monospace;font-size:11px;color:var(--text-secondary);">Stage direction <kbd>S</kbd></span>
+            </label>
+            <label style="display:flex;align-items:center;gap:7px;margin-bottom:10px;cursor:pointer;">
+              <input type="checkbox" id="zd-musicline" style="accent-color:#4ecdc4;">
+              <span style="font-family:'DM Mono',monospace;font-size:11px;color:var(--text-secondary);">Music line <kbd>M</kbd></span>
             </label>
             <div style="display:flex;gap:6px;justify-content:flex-end;">
               <button class="ze-tool-btn ze-danger" id="ze-btn-del-zone">Delete Zone</button>

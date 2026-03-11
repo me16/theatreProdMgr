@@ -623,7 +623,7 @@ function zeRenderZones() {
   zones.forEach((zone, idx) => {
     const div = document.createElement('div');
     const isMulti = zeMultiSelected.has(idx);
-    div.className = 'ze-zone' + (zone.isCharName ? ' ze-char-name' : zone.isStageDirection ? ' ze-stage-dir' : '') + (idx === zeSelectedIdx ? ' selected' : '') + (isMulti ? ' ze-multi-selected' : '');
+    div.className = 'ze-zone' + (zone.isCharName ? ' ze-char-name' : zone.isStageDirection ? ' ze-stage-dir' : zone.isMusicLine ? ' ze-music-line' : '') + (idx === zeSelectedIdx ? ' selected' : '') + (isMulti ? ' ze-multi-selected' : '');
     div.style.left = zone.x + '%'; div.style.top = zone.y + '%';
     div.style.width = zone.w + '%'; div.style.height = Math.max(zone.h, 1.2) + '%';
     div.dataset.idx = idx;
@@ -791,6 +791,7 @@ function zePopulateDetail(idx, focusText = false) {
   const t = getValue('zd-text'); if (t) t.value = z.text || '';
   const cn = getValue('zd-charname'); if (cn) cn.checked = !!z.isCharName;
   const sd = getValue('zd-stagedir'); if (sd) sd.checked = !!z.isStageDirection;
+  const ml = getValue('zd-musicline'); if (ml) ml.checked = !!z.isMusicLine;
   if (focusText && t) requestAnimationFrame(() => { t.focus(); t.select(); });
 }
 
@@ -804,8 +805,10 @@ function zeApplyDetail() {
   z.text = document.getElementById('zd-text')?.value || '';
   z.isCharName = document.getElementById('zd-charname')?.checked || false;
   z.isStageDirection = document.getElementById('zd-stagedir')?.checked || false;
-  if (z.isCharName) z.isStageDirection = false;
-  if (z.isStageDirection) z.isCharName = false;
+  z.isMusicLine = document.getElementById('zd-musicline')?.checked || false;
+  if (z.isCharName) { z.isStageDirection = false; z.isMusicLine = false; }
+  if (z.isStageDirection) { z.isCharName = false; z.isMusicLine = false; }
+  if (z.isMusicLine) { z.isCharName = false; z.isStageDirection = false; }
   zeRenderZones(); zeUpdateListPanel(); zeSelectZone(zeSelectedIdx); debounceSaveZones();
   toast('Zone updated');
 }
@@ -832,14 +835,21 @@ function zeMultiDelete() {
 function zeMultiToggleCharName() {
   const zones = zeCurrentZones();
   const anyNon = [...zeMultiSelected].some(i => !zones[i]?.isCharName);
-  zeMultiSelected.forEach(i => { if (zones[i]) { zones[i].isCharName = anyNon; if (anyNon) zones[i].isStageDirection = false; } });
+  zeMultiSelected.forEach(i => { if (zones[i]) { zones[i].isCharName = anyNon; if (anyNon) { zones[i].isStageDirection = false; zones[i].isMusicLine = false; } } });
   zeRenderZones(); zeUpdateListPanel(); debounceSaveZones();
 }
 
 function zeMultiToggleStagDir() {
   const zones = zeCurrentZones();
   const anyNon = [...zeMultiSelected].some(i => !zones[i]?.isStageDirection);
-  zeMultiSelected.forEach(i => { if (zones[i]) { zones[i].isStageDirection = anyNon; if (anyNon) zones[i].isCharName = false; } });
+  zeMultiSelected.forEach(i => { if (zones[i]) { zones[i].isStageDirection = anyNon; if (anyNon) { zones[i].isCharName = false; zones[i].isMusicLine = false; } } });
+  zeRenderZones(); zeUpdateListPanel(); debounceSaveZones();
+}
+
+function zeMultiToggleMusicLine() {
+  const zones = zeCurrentZones();
+  const anyNon = [...zeMultiSelected].some(i => !zones[i]?.isMusicLine);
+  zeMultiSelected.forEach(i => { if (zones[i]) { zones[i].isMusicLine = anyNon; if (anyNon) { zones[i].isCharName = false; zones[i].isStageDirection = false; } } });
   zeRenderZones(); zeUpdateListPanel(); debounceSaveZones();
 }
 
@@ -896,10 +906,10 @@ function zeUpdateListPanel() {
     return;
   }
   list.innerHTML = zones.map((z, idx) => {
-    const type = z.isCharName ? 'char name' : z.isStageDirection ? 'stage dir' : 'dialogue';
+    const type = z.isCharName ? 'char name' : z.isStageDirection ? 'stage dir' : z.isMusicLine ? 'music' : 'dialogue';
     const textEl = z.text ? `<div class="ze-item-text">${escapeHtml(z.text.substring(0, 60))}${z.text.length > 60 ? '\u2026' : ''}</div>` : `<div class="ze-item-no-text">[no text]</div>`;
     const isSel = idx === zeSelectedIdx, isMulti = zeMultiSelected.has(idx);
-    const cls = ['ze-list-item', isSel ? 'selected' : '', isMulti ? 'ze-multi-selected' : '', z.isCharName ? 'ze-cn-item' : ''].filter(Boolean).join(' ');
+    const cls = ['ze-list-item', isSel ? 'selected' : '', isMulti ? 'ze-multi-selected' : '', z.isCharName ? 'ze-cn-item' : z.isMusicLine ? 'ze-ml-item' : ''].filter(Boolean).join(' ');
     return `<div class="${cls}" data-idx="${idx}"><div class="ze-item-idx">${idx}</div><div class="ze-item-body"><div class="ze-item-type">${type}</div>${textEl}</div><button class="ze-item-del" data-idx="${idx}">\u00d7</button></div>`;
   }).join('');
 
@@ -929,6 +939,7 @@ function wireZeToolbar() {
   document.getElementById('ze-btn-save')?.addEventListener('click', () => firebaseSaveZones(pk()));
   document.getElementById('ze-btn-multi-char')?.addEventListener('click', zeMultiToggleCharName);
   document.getElementById('ze-btn-multi-dir')?.addEventListener('click', zeMultiToggleStagDir);
+  document.getElementById('ze-btn-multi-music')?.addEventListener('click', zeMultiToggleMusicLine);
   document.getElementById('ze-btn-multi-del')?.addEventListener('click', zeMultiDelete);
   document.getElementById('ze-btn-multi-clear')?.addEventListener('click', zeClearMultiSelect);
   document.getElementById('ze-btn-apply')?.addEventListener('click', zeApplyDetail);
@@ -953,6 +964,7 @@ function wireZeToolbar() {
 
   document.getElementById('zd-charname')?.addEventListener('change', zeApplyDetail);
   document.getElementById('zd-stagedir')?.addEventListener('change', zeApplyDetail);
+  document.getElementById('zd-musicline')?.addEventListener('change', zeApplyDetail);
 
   // Page navigation (zone editor uses the same ln-page-nav)
   document.getElementById('ln-prev-page')?.addEventListener('click', () => changeZonePage(-1));
@@ -1097,12 +1109,17 @@ document.addEventListener('keydown', e => {
   }
   if (e.key.toLowerCase() === 'c' && !e.metaKey && !e.ctrlKey) {
     if (zeMultiSelected.size > 0) { zeMultiToggleCharName(); return; }
-    if (zeSelectedIdx !== null) { const z = zeCurrentZones()[zeSelectedIdx]; if (z) { z.isCharName = !z.isCharName; if (z.isCharName) z.isStageDirection = false; zeRenderZones(); zeUpdateListPanel(); zeSelectZone(zeSelectedIdx); debounceSaveZones(); } }
+    if (zeSelectedIdx !== null) { const z = zeCurrentZones()[zeSelectedIdx]; if (z) { z.isCharName = !z.isCharName; if (z.isCharName) { z.isStageDirection = false; z.isMusicLine = false; } zeRenderZones(); zeUpdateListPanel(); zeSelectZone(zeSelectedIdx); debounceSaveZones(); } }
     return;
   }
   if (e.key.toLowerCase() === 's' && !e.metaKey && !e.ctrlKey) {
     if (zeMultiSelected.size > 0) { zeMultiToggleStagDir(); return; }
-    if (zeSelectedIdx !== null) { const z = zeCurrentZones()[zeSelectedIdx]; if (z) { z.isStageDirection = !z.isStageDirection; if (z.isStageDirection) z.isCharName = false; zeRenderZones(); zeUpdateListPanel(); zeSelectZone(zeSelectedIdx); debounceSaveZones(); } }
+    if (zeSelectedIdx !== null) { const z = zeCurrentZones()[zeSelectedIdx]; if (z) { z.isStageDirection = !z.isStageDirection; if (z.isStageDirection) { z.isCharName = false; z.isMusicLine = false; } zeRenderZones(); zeUpdateListPanel(); zeSelectZone(zeSelectedIdx); debounceSaveZones(); } }
+    return;
+  }
+  if (e.key.toLowerCase() === 'm' && !e.metaKey && !e.ctrlKey) {
+    if (zeMultiSelected.size > 0) { zeMultiToggleMusicLine(); return; }
+    if (zeSelectedIdx !== null) { const z = zeCurrentZones()[zeSelectedIdx]; if (z) { z.isMusicLine = !z.isMusicLine; if (z.isMusicLine) { z.isCharName = false; z.isStageDirection = false; } zeRenderZones(); zeUpdateListPanel(); zeSelectZone(zeSelectedIdx); debounceSaveZones(); } }
     return;
   }
 });

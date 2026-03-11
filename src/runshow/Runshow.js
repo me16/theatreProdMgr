@@ -1336,7 +1336,7 @@ function rsRenderLineZones(zKey) {
       return;
     }
     const div = document.createElement('div');
-    div.className = 'line-zone' + (existingZoneIdxs.has(idx) ? ' has-note' : '');
+    div.className = 'line-zone' + (existingZoneIdxs.has(idx) ? ' has-note' : '') + (zone.isMusicLine ? ' line-zone--music' : '');
     div.style.left = Math.max(0, zone.x - 0.5) + '%'; div.style.top = zone.y + '%';
     div.style.width = Math.min(100, zone.w + 1) + '%'; div.style.height = Math.max(zone.h + 0.6, 2.2) + '%';
     div.dataset.zone = idx;

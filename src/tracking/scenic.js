@@ -7,6 +7,8 @@ import { state } from '../shared/state.js';
 import { isOwner } from '../shared/roles.js';
 import { toast } from '../shared/toast.js';
 import { escapeHtml, sanitizeName, confirmDialog } from '../shared/ui.js';
+import { downloadCSV } from '../shared/ui.js';
+import { showImportModal } from '../shared/import-modal.js';
 import { getItemStatus } from './core.js';
 import { getProductionLocations } from './locations.js';
 import { getActiveTrackingType } from './tracking-tab.js';
@@ -124,7 +126,7 @@ function _renderManage(el) {
   }
 
   el.innerHTML = '<div style="padding:24px;">' +
-    '<h3 style="font-size:16px;color:var(--track-scenic);margin-bottom:16px;">Scenic Pieces</h3>' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;"><h3 style="font-size:16px;color:var(--track-scenic);margin:0;">Scenic Pieces</h3><div style="display:flex;gap:8px;"><button class="settings-btn" id="scenic-import-btn">Import JSON</button><button class="settings-btn" id="scenic-export-btn">Export CSV</button></div></div>' +
     cueEditHtml +
     '<div style="background:var(--bg-raised);border:1px solid var(--bg-border);border-radius:8px;padding:16px;margin-bottom:16px;">' +
     '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
@@ -213,6 +215,107 @@ function _renderManage(el) {
   el.querySelector('#scenic-cancel-edit-btn')?.addEventListener('click', () => {
     _editingPieceId = null; _pieceCueRows = [];
     renderScenicContent(document.getElementById('props-content'));
+  });
+
+  // Import / Export
+  el.querySelector('#scenic-export-btn')?.addEventListener('click', () => _exportScenicCSV());
+  el.querySelector('#scenic-import-btn')?.addEventListener('click', () => _importScenicJSON());
+}
+
+function _exportScenicCSV() {
+  if (scenicPieces.length === 0) { toast('No scenic pieces to export.', 'warn'); return; }
+  const maxCues = Math.max(1, ...scenicPieces.map(p => (p.cues || []).length));
+  const header = ['name', 'weight', 'start', 'moveMethod', 'notes'];
+  for (let i = 1; i <= maxCues; i++) { header.push('cue_' + i + '_enterPage', 'cue_' + i + '_exitPage', 'cue_' + i + '_enterLocation', 'cue_' + i + '_exitLocation'); }
+  const rows = [header];
+  scenicPieces.forEach(p => {
+    const cues = p.cues || [];
+    const row = [p.name || '', p.weight || '', p.start || '', p.moveMethod || '', p.notes || ''];
+    for (let i = 0; i < maxCues; i++) { const c = cues[i]; if (c) { row.push(c.enterPage || '', c.exitPage || '', c.enterLocation || '', c.exitLocation || ''); } else { row.push('', '', '', ''); } }
+    rows.push(row);
+  });
+  const title = (state.activeProduction?.title || 'production').replace(/[^a-zA-Z0-9]/g, '_');
+  downloadCSV(rows, 'scenic_' + title + '_' + new Date().toISOString().split('T')[0] + '.csv');
+  toast('Scenic pieces exported.', 'success');
+}
+
+function _importScenicJSON() {
+  if (!isOwner()) return;
+  showImportModal({
+    type: 'scenic',
+    schemaHtml: 'Your JSON must be an <strong>array of objects</strong>. Each object needs a <code>name</code> (string). Optionally include <code>weight</code> (number, lbs), <code>moveMethod</code>, <code>notes</code>, and a <code>cues</code> array with enter/exit pages and locations.',
+    exampleJson: JSON.stringify([
+      {
+        name: "Castle Wall Flat",
+        weight: 120,
+        start: "backstage-left",
+        cues: [
+          { enterPage: 8, exitPage: 25, enterLocation: "backstage-left", exitLocation: "backstage-right" }
+        ]
+      },
+      {
+        name: "Forest Drop",
+        weight: 45,
+        start: "backstage-right",
+        cues: [
+          { enterPage: 3, exitPage: 15, enterLocation: "backstage-right", exitLocation: "backstage-left" },
+          { enterPage: 30, exitPage: 42, enterLocation: "backstage-left", exitLocation: "backstage-right" }
+        ]
+      }
+    ], null, 2),
+    claudePrompt: `I have a scenic/set piece tracking spreadsheet for a theater production. Please convert it to a JSON array with this exact format:
+
+[
+  {
+    "name": "Piece Name",
+    "weight": 120,
+    "start": "backstage-left",
+    "moveMethod": "fly",
+    "notes": "Optional notes",
+    "cues": [
+      {
+        "enterPage": 8,
+        "exitPage": 25,
+        "enterLocation": "backstage-left",
+        "exitLocation": "backstage-right"
+      }
+    ]
+  }
+]
+
+Rules:
+- "name" is required for each entry
+- "weight" is optional (number, in lbs)
+- "start" defaults to "backstage-left" — values: "backstage-left", "backstage-right", "on-stage"
+- "enterPage" and "exitPage" must be positive integers
+- "moveMethod" is optional (e.g. "fly", "push", "track", "manual")
+- Output ONLY the raw JSON array, no markdown or explanation`,
+    onFile: async (data) => {
+      for (let i = 0; i < data.length; i++) {
+        const p = data[i];
+        if (!p.name || typeof p.name !== 'string') { toast('Item ' + (i+1) + ': name is required.', 'error'); return; }
+        if (p.cues && !Array.isArray(p.cues)) { toast('Item ' + (i+1) + ': cues must be an array.', 'error'); return; }
+        if (p.cues) {
+          for (let j = 0; j < p.cues.length; j++) {
+            if (!Number.isInteger(p.cues[j].enterPage) || p.cues[j].enterPage < 1) { toast('Item ' + (i+1) + ', Cue ' + (j+1) + ': enterPage must be a positive integer.', 'error'); return; }
+            if (!Number.isInteger(p.cues[j].exitPage) || p.cues[j].exitPage < 1) { toast('Item ' + (i+1) + ', Cue ' + (j+1) + ': exitPage must be a positive integer.', 'error'); return; }
+          }
+        }
+      }
+      if (!confirmDialog('Found ' + data.length + ' scenic pieces. Import will ADD to existing — duplicates not checked. Continue?')) return;
+      const pid = state.activeProduction.id;
+      for (const p of data) {
+        const cues = (p.cues || []).map(c => ({
+          enterPage: c.enterPage, exitPage: c.exitPage,
+          enterLocation: c.enterLocation || 'backstage-left', exitLocation: c.exitLocation || 'backstage-right',
+        }));
+        await addDoc(collection(db, 'productions', pid, 'scenicPieces'), {
+          name: sanitizeName(p.name), weight: p.weight || null, trackingType: 'scenic',
+          start: p.start || 'backstage-left', cues, moveMethod: p.moveMethod || '', notes: p.notes || '', createdAt: serverTimestamp(),
+        });
+      }
+      toast('Imported ' + data.length + ' scenic pieces.', 'success');
+    }
   });
 }
 

@@ -7,6 +7,8 @@ import { state } from '../shared/state.js';
 import { isOwner } from '../shared/roles.js';
 import { toast } from '../shared/toast.js';
 import { escapeHtml, sanitizeName, confirmDialog } from '../shared/ui.js';
+import { downloadCSV } from '../shared/ui.js';
+import { showImportModal } from '../shared/import-modal.js';
 import { getCastMembers } from '../cast/cast.js';
 import { getProductionLocations } from './locations.js';
 import { getActiveTrackingType } from './tracking-tab.js';
@@ -108,7 +110,7 @@ function _renderManage(el) {
   }
 
   el.innerHTML = '<div style="padding:24px;">' +
-    '<h3 style="font-size:16px;color:var(--track-costume);margin-bottom:16px;">Manage Costumes</h3>' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;"><h3 style="font-size:16px;color:var(--track-costume);margin:0;">Manage Costumes</h3><div style="display:flex;gap:8px;"><button class="settings-btn" id="costumes-import-btn">Import JSON</button><button class="settings-btn" id="costumes-export-btn">Export CSV</button></div></div>' +
     cueEditHtml +
     '<div style="background:var(--bg-raised);border:1px solid var(--bg-border);border-radius:8px;padding:16px;margin-bottom:16px;">' +
     '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
@@ -170,6 +172,105 @@ function _renderManage(el) {
   el.querySelector('#costume-cancel-edit-btn')?.addEventListener('click', () => {
     _editingCostumeId = null; _costumeCueRows = [];
     renderCostumesContent(document.getElementById('props-content'));
+  });
+
+  // Import / Export
+  el.querySelector('#costumes-export-btn')?.addEventListener('click', () => _exportCostumesCSV());
+  el.querySelector('#costumes-import-btn')?.addEventListener('click', () => _importCostumesJSON());
+}
+
+function _exportCostumesCSV() {
+  if (costumes.length === 0) { toast('No costumes to export.', 'warn'); return; }
+  const maxCues = Math.max(1, ...costumes.map(c => (c.cues || []).length));
+  const header = ['name', 'characterName', 'presetLocation'];
+  for (let i = 1; i <= maxCues; i++) { header.push('cue_' + i + '_startPage', 'cue_' + i + '_endPage', 'cue_' + i + '_changeLocation', 'cue_' + i + '_isQuickChange'); }
+  const rows = [header];
+  costumes.forEach(c => {
+    const cues = c.cues || [];
+    const row = [c.name || '', c.characterName || '', c.presetLocation || ''];
+    for (let i = 0; i < maxCues; i++) { const q = cues[i]; if (q) { row.push(q.startPage || '', q.endPage || '', q.changeLocation || '', q.isQuickChange ? 'YES' : ''); } else { row.push('', '', '', ''); } }
+    rows.push(row);
+  });
+  const title = (state.activeProduction?.title || 'production').replace(/[^a-zA-Z0-9]/g, '_');
+  downloadCSV(rows, 'costumes_' + title + '_' + new Date().toISOString().split('T')[0] + '.csv');
+  toast('Costumes exported.', 'success');
+}
+
+function _importCostumesJSON() {
+  if (!isOwner()) return;
+  showImportModal({
+    type: 'costumes',
+    schemaHtml: 'Your JSON must be an <strong>array of objects</strong>. Each object needs a <code>name</code> (string). Optionally include <code>characterName</code>, <code>presetLocation</code>, and a <code>cues</code> array with start/end pages, change location, and quick-change flag.',
+    exampleJson: JSON.stringify([
+      {
+        name: "Ophelia's Gown",
+        characterName: "Ophelia",
+        presetLocation: "backstage-left",
+        cues: [
+          { startPage: 12, endPage: 20, changeLocation: "backstage-left", isQuickChange: false },
+          { startPage: 28, endPage: 35, changeLocation: "backstage-right", isQuickChange: true }
+        ]
+      },
+      {
+        name: "Hamlet's Mourning Cloak",
+        characterName: "Hamlet",
+        cues: [
+          { startPage: 1, endPage: 18, changeLocation: "backstage-left", isQuickChange: false }
+        ]
+      }
+    ], null, 2),
+    claudePrompt: `I have a costume tracking spreadsheet for a theater production. Please convert it to a JSON array with this exact format:
+
+[
+  {
+    "name": "Costume Name",
+    "characterName": "Character Name",
+    "presetLocation": "backstage-left",
+    "cues": [
+      {
+        "startPage": 12,
+        "endPage": 20,
+        "changeLocation": "backstage-left",
+        "isQuickChange": false
+      }
+    ]
+  }
+]
+
+Rules:
+- "name" is required for each entry
+- "characterName" is optional but recommended
+- "presetLocation" defaults to "backstage-left" — values: "backstage-left", "backstage-right", "on-stage"
+- "startPage" and "endPage" must be positive integers
+- "isQuickChange" is a boolean (true/false) — set true for fast costume changes
+- Output ONLY the raw JSON array, no markdown or explanation`,
+    onFile: async (data) => {
+      for (let i = 0; i < data.length; i++) {
+        const c = data[i];
+        if (!c.name || typeof c.name !== 'string') { toast('Item ' + (i+1) + ': name is required.', 'error'); return; }
+        if (c.cues && !Array.isArray(c.cues)) { toast('Item ' + (i+1) + ': cues must be an array.', 'error'); return; }
+        if (c.cues) {
+          for (let j = 0; j < c.cues.length; j++) {
+            if (!Number.isInteger(c.cues[j].startPage) || c.cues[j].startPage < 1) { toast('Item ' + (i+1) + ', Cue ' + (j+1) + ': startPage must be a positive integer.', 'error'); return; }
+            if (!Number.isInteger(c.cues[j].endPage) || c.cues[j].endPage < 1) { toast('Item ' + (i+1) + ', Cue ' + (j+1) + ': endPage must be a positive integer.', 'error'); return; }
+          }
+        }
+      }
+      if (!confirmDialog('Found ' + data.length + ' costumes. Import will ADD to existing — duplicates not checked. Continue?')) return;
+      const pid = state.activeProduction.id;
+      for (const c of data) {
+        const cues = (c.cues || []).map(q => ({
+          startPage: q.startPage, endPage: q.endPage,
+          changeLocation: q.changeLocation || 'backstage-left', isQuickChange: !!q.isQuickChange,
+          quickChangeDetails: q.isQuickChange ? { dresserCastId: '', dresserName: '', estimatedSeconds: 0, notes: '' } : null,
+        }));
+        await addDoc(collection(db, 'productions', pid, 'costumes'), {
+          name: sanitizeName(c.name), characterName: c.characterName || '', castId: '', trackingType: 'costume',
+          description: '', photoUrl: '', presetLocation: c.presetLocation || 'backstage-left', cues, createdAt: serverTimestamp(),
+        });
+      }
+      toast('Imported ' + data.length + ' costumes.', 'success');
+    }
   });
 }
 

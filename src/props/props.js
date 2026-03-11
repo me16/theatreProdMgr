@@ -3,6 +3,7 @@ import { state } from '../shared/state.js';
 import { isOwner } from '../shared/roles.js';
 import { toast } from '../shared/toast.js';
 import { escapeHtml, sanitizeName, confirmDialog, downloadCSV } from '../shared/ui.js';
+import { showImportModal } from '../shared/import-modal.js';
 import {
   collection, doc, addDoc, updateDoc, deleteDoc, onSnapshot,
   serverTimestamp
@@ -982,20 +983,63 @@ function exportPropsCSV() {
 
 function importPropsJSON() {
   if (!isOwner()) return;
-  const input = document.createElement('input'); input.type = 'file'; input.accept = '.json';
-  input.addEventListener('change', async () => {
-    const file = input.files[0]; if (!file) return;
-    try {
-      const data = JSON.parse(await file.text());
-      if (!Array.isArray(data)) { toast('JSON must be an array of props.', 'error'); return; }
+  showImportModal({
+    type: 'props',
+    schemaHtml: 'Your JSON must be an <strong>array of objects</strong>. Each object needs a <code>name</code> (string) and <code>start</code> (<code>"SL"</code> or <code>"SR"</code>). Optionally include a <code>cues</code> array with enter/exit page numbers, locations, and carrier/mover names.',
+    exampleJson: JSON.stringify([
+      {
+        name: "Yorick's Skull",
+        start: "SL",
+        cues: [
+          { enterPage: 12, exitPage: 18, enterLocation: "backstage-left", exitLocation: "backstage-right", carrierOn: "Hamlet", carrierOff: "Gravedigger", mover: "" }
+        ]
+      },
+      {
+        name: "Letter",
+        start: "SR",
+        cues: [
+          { enterPage: 5, exitPage: 9, enterLocation: "backstage-right", exitLocation: "on-stage" },
+          { enterPage: 22, exitPage: 30, enterLocation: "on-stage", exitLocation: "backstage-left" }
+        ]
+      }
+    ], null, 2),
+    claudePrompt: `I have a props tracking spreadsheet/document for a theater production. Please convert it to a JSON array with this exact format:
+
+[
+  {
+    "name": "Prop Name",
+    "start": "SL",
+    "cues": [
+      {
+        "enterPage": 5,
+        "exitPage": 10,
+        "enterLocation": "backstage-left",
+        "exitLocation": "backstage-right",
+        "carrierOn": "Actor Name",
+        "carrierOff": "Actor Name",
+        "mover": "Crew Name"
+      }
+    ]
+  }
+]
+
+Rules:
+- "start" must be "SL" (stage left) or "SR" (stage right)
+- Location values: "backstage-left", "backstage-right", "on-stage"
+- "enterPage" and "exitPage" must be positive integers
+- "carrierOn", "carrierOff", "mover" are optional strings
+- Output ONLY the raw JSON array, no markdown or explanation`,
+    onFile: async (data) => {
       for (let i = 0; i < data.length; i++) {
         const p = data[i];
         if (!p.name || typeof p.name !== 'string') { toast('Item ' + (i+1) + ': name is required.', 'error'); return; }
         if (!['SL', 'SR'].includes(p.start)) { toast('Item ' + (i+1) + ': start must be SL or SR.', 'error'); return; }
         if (p.cues && !Array.isArray(p.cues)) { toast('Item ' + (i+1) + ': cues must be an array.', 'error'); return; }
-        for (let j = 0; j < p.cues.length; j++) {
-          if (!Number.isInteger(p.cues[j].enterPage) || p.cues[j].enterPage < 1) { toast('Item ' + (i+1) + ', Cue ' + (j+1) + ': enterPage must be a positive integer.', 'error'); return; }
-          if (!Number.isInteger(p.cues[j].exitPage) || p.cues[j].exitPage < 1) { toast('Item ' + (i+1) + ', Cue ' + (j+1) + ': exitPage must be a positive integer.', 'error'); return; }
+        if (p.cues) {
+          for (let j = 0; j < p.cues.length; j++) {
+            if (!Number.isInteger(p.cues[j].enterPage) || p.cues[j].enterPage < 1) { toast('Item ' + (i+1) + ', Cue ' + (j+1) + ': enterPage must be a positive integer.', 'error'); return; }
+            if (!Number.isInteger(p.cues[j].exitPage) || p.cues[j].exitPage < 1) { toast('Item ' + (i+1) + ', Cue ' + (j+1) + ': exitPage must be a positive integer.', 'error'); return; }
+          }
         }
       }
       if (!confirmDialog('Found ' + data.length + ' props. Import will ADD to existing props — duplicates not checked. Continue?')) return;
@@ -1005,7 +1049,6 @@ function importPropsJSON() {
         await addDoc(collection(db, 'productions', pid, 'props'), { name: sanitizeName(p.name), start: p.start, cues, enters: cues.map(c => c.enterPage), exits: cues.map(c => c.exitPage), endLocation: cues.length > 0 ? cues[cues.length - 1].exitLocation : p.start, createdAt: serverTimestamp() });
       }
       toast('Imported ' + data.length + ' props.', 'success');
-    } catch(e) { toast('Invalid JSON: ' + e.message, 'error'); }
+    }
   });
-  input.click();
 }

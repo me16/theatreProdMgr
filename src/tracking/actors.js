@@ -7,6 +7,8 @@ import { state } from '../shared/state.js';
 import { isOwner } from '../shared/roles.js';
 import { toast } from '../shared/toast.js';
 import { escapeHtml, sanitizeName, confirmDialog } from '../shared/ui.js';
+import { downloadCSV } from '../shared/ui.js';
+import { showImportModal } from '../shared/import-modal.js';
 import { getCastMembers } from '../cast/cast.js';
 import { getItemStatus, computeBadgeCounts } from './core.js';
 import { getProductionLocations } from './locations.js';
@@ -115,7 +117,7 @@ function _renderManage(el) {
   }
 
   el.innerHTML = '<div style="padding:24px;">' +
-    '<h3 style="font-size:16px;color:var(--track-actor);margin-bottom:16px;">Manage Actors</h3>' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;"><h3 style="font-size:16px;color:var(--track-actor);margin:0;">Manage Actors</h3><div style="display:flex;gap:8px;"><button class="settings-btn" id="actors-import-btn">Import JSON</button><button class="settings-btn" id="actors-export-btn">Export CSV</button></div></div>' +
     cueEditHtml +
     '<div style="background:var(--bg-raised);border:1px solid var(--bg-border);border-radius:8px;padding:16px;margin-bottom:20px;">' +
     '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
@@ -179,6 +181,109 @@ function _renderManage(el) {
   el.querySelector('#actor-cancel-edit-btn')?.addEventListener('click', () => {
     _editingActorId = null; _actorCueRows = [];
     renderActorsContent(document.getElementById('props-content'));
+  });
+
+  // Import / Export
+  el.querySelector('#actors-export-btn')?.addEventListener('click', () => _exportActorsCSV());
+  el.querySelector('#actors-import-btn')?.addEventListener('click', () => _importActorsJSON());
+}
+
+function _exportActorsCSV() {
+  if (actorCues.length === 0) { toast('No actors to export.', 'warn'); return; }
+  const maxCues = Math.max(1, ...actorCues.map(a => (a.cues || []).length));
+  const header = ['characterName', 'actorName', 'color', 'defaultHoldLocation'];
+  for (let i = 1; i <= maxCues; i++) { header.push('cue_' + i + '_holdPage', 'cue_' + i + '_enterPage', 'cue_' + i + '_exitPage', 'cue_' + i + '_enterLocation', 'cue_' + i + '_exitLocation'); }
+  const rows = [header];
+  actorCues.forEach(a => {
+    const cues = a.cues || [];
+    const row = [a.characterName || '', a.actorName || '', a.color || '', a.defaultHoldLocation || ''];
+    for (let i = 0; i < maxCues; i++) { const c = cues[i]; if (c) { row.push(c.holdPage || '', c.enterPage || '', c.exitPage || '', c.enterLocation || '', c.exitLocation || ''); } else { row.push('', '', '', '', ''); } }
+    rows.push(row);
+  });
+  const title = (state.activeProduction?.title || 'production').replace(/[^a-zA-Z0-9]/g, '_');
+  downloadCSV(rows, 'actors_' + title + '_' + new Date().toISOString().split('T')[0] + '.csv');
+  toast('Actors exported.', 'success');
+}
+
+function _importActorsJSON() {
+  if (!isOwner()) return;
+  showImportModal({
+    type: 'actors',
+    schemaHtml: 'Your JSON must be an <strong>array of objects</strong>. Each object needs a <code>characterName</code> (string). Optionally include <code>actorName</code>, <code>color</code> (hex), and a <code>cues</code> array with hold/enter/exit pages and locations.',
+    exampleJson: JSON.stringify([
+      {
+        characterName: "Hamlet",
+        actorName: "John Smith",
+        color: "#5B9BD4",
+        defaultHoldLocation: "backstage-left",
+        cues: [
+          { holdPage: 3, enterPage: 5, exitPage: 18, enterLocation: "backstage-left", exitLocation: "backstage-right" },
+          { holdPage: 20, enterPage: 22, exitPage: 35, enterLocation: "backstage-right", exitLocation: "backstage-left" }
+        ]
+      },
+      {
+        characterName: "Ophelia",
+        actorName: "Jane Doe",
+        color: "#E63946",
+        cues: [
+          { holdPage: 10, enterPage: 12, exitPage: 20, enterLocation: "backstage-right", exitLocation: "backstage-left" }
+        ]
+      }
+    ], null, 2),
+    claudePrompt: `I have a cast/actor tracking spreadsheet for a theater production. Please convert it to a JSON array with this exact format:
+
+[
+  {
+    "characterName": "Character Name",
+    "actorName": "Actor Real Name",
+    "color": "#5B9BD4",
+    "defaultHoldLocation": "backstage-left",
+    "cues": [
+      {
+        "holdPage": 3,
+        "enterPage": 5,
+        "exitPage": 18,
+        "enterLocation": "backstage-left",
+        "exitLocation": "backstage-right"
+      }
+    ]
+  }
+]
+
+Rules:
+- "characterName" is required for each entry
+- "holdPage" is the page where the actor goes to their hold position (optional, set to 0 if unknown)
+- "enterPage" and "exitPage" must be positive integers
+- Location values: "backstage-left", "backstage-right", "on-stage"
+- "color" should be a hex color code (optional)
+- Output ONLY the raw JSON array, no markdown or explanation`,
+    onFile: async (data) => {
+      for (let i = 0; i < data.length; i++) {
+        const a = data[i];
+        if (!a.characterName || typeof a.characterName !== 'string') { toast('Item ' + (i+1) + ': characterName is required.', 'error'); return; }
+        if (a.cues && !Array.isArray(a.cues)) { toast('Item ' + (i+1) + ': cues must be an array.', 'error'); return; }
+        if (a.cues) {
+          for (let j = 0; j < a.cues.length; j++) {
+            if (!Number.isInteger(a.cues[j].enterPage) || a.cues[j].enterPage < 1) { toast('Item ' + (i+1) + ', Cue ' + (j+1) + ': enterPage must be a positive integer.', 'error'); return; }
+            if (!Number.isInteger(a.cues[j].exitPage) || a.cues[j].exitPage < 1) { toast('Item ' + (i+1) + ', Cue ' + (j+1) + ': exitPage must be a positive integer.', 'error'); return; }
+          }
+        }
+      }
+      if (!confirmDialog('Found ' + data.length + ' actors. Import will ADD to existing actors — duplicates not checked. Continue?')) return;
+      const pid = state.activeProduction.id;
+      for (const a of data) {
+        const cues = (a.cues || []).map(c => ({
+          holdPage: parseInt(c.holdPage) || 0, enterPage: c.enterPage, exitPage: c.exitPage,
+          enterLocation: c.enterLocation || 'backstage-left', exitLocation: c.exitLocation || 'backstage-right',
+          holdLocation: c.holdLocation || c.enterLocation || '', notes: '', linkedPropIds: [], linkedCostumeId: '',
+        }));
+        await addDoc(collection(db, 'productions', pid, 'actorCues'), {
+          characterName: sanitizeName(a.characterName), castId: '', actorName: a.actorName || '', color: a.color || '#5B9BD4',
+          trackingType: 'actor', cues, defaultHoldLocation: a.defaultHoldLocation || 'backstage-left', notes: '', createdAt: serverTimestamp(),
+        });
+      }
+      toast('Imported ' + data.length + ' actors.', 'success');
+    }
   });
 }
 

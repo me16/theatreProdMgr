@@ -633,14 +633,20 @@ function zeRenderZones() {
     label.textContent = zone.text ? zone.text.substring(0, 50) : `[zone ${idx}]`;
     div.appendChild(label);
 
-    if (zone.assignedCharName) {
-      const ab = document.createElement('span');
-      ab.className = 'ze-zone-actor-badge';
-      ab.textContent = zone.assignedCharName;
+    // Render actor badges (supports multiple)
+    const _zeActors = zone.assignedActors && zone.assignedActors.length > 0
+      ? zone.assignedActors
+      : (zone.assignedCastId && zone.assignedCharName ? [{ castId: zone.assignedCastId, charName: zone.assignedCharName }] : []);
+    if (_zeActors.length > 0) {
       const _cast = getCastMembers();
-      const _member = _cast.find(m => m.id === zone.assignedCastId);
-      ab.style.background = _member?.color || '#5b9bd4';
-      div.appendChild(ab);
+      _zeActors.forEach(a => {
+        const ab = document.createElement('span');
+        ab.className = 'ze-zone-actor-badge';
+        ab.textContent = a.charName;
+        const _member = _cast.find(m => m.id === a.castId);
+        ab.style.background = _member?.color || '#5b9bd4';
+        div.appendChild(ab);
+      });
     }
 
     const handle = document.createElement('div');
@@ -802,27 +808,31 @@ function zePopulateDetail(idx, focusText = false) {
   const cn = getValue('zd-charname'); if (cn) cn.checked = !!z.isCharName;
   const sd = getValue('zd-stagedir'); if (sd) sd.checked = !!z.isStageDirection;
   const ml = getValue('zd-musicline'); if (ml) ml.checked = !!z.isMusicLine;
-  // Actor assignment dropdown
-  const actorSelect = document.getElementById('zd-actor');
+  // Actor assignment checkbox list (supports multiple actors per zone)
+  const actorListEl = document.getElementById('zd-actor-list');
   const actorSection = document.getElementById('zd-actor-section');
-  if (actorSelect && actorSection) {
-    // Hide for charName/stageDir zones, show for dialogue/music
-    actorSection.style.display = (z.isCharName || z.isStageDirection) ? 'none' : '';
+  if (actorListEl && actorSection) {
+    // Show for all zone types except stageDir
+    actorSection.style.display = z.isStageDirection ? 'none' : '';
     const cast = getCastMembers();
-    let opts = '<option value="">— none —</option>';
+    // Normalise: read assignedActors array, fall back to legacy single fields
+    const assigned = z.assignedActors && z.assignedActors.length > 0
+      ? z.assignedActors
+      : (z.assignedCastId && z.assignedCharName ? [{ castId: z.assignedCastId, charName: z.assignedCharName }] : []);
+    let html = '';
     cast.forEach(m => {
       const chars = m.characters?.length > 0 ? m.characters : [m.name];
       chars.forEach(ch => {
         const val = m.id + '::' + ch;
-        const sel = (m.id === z.assignedCastId && ch === z.assignedCharName) ? ' selected' : '';
-        opts += '<option value="' + escapeHtml(val) + '"' + sel + '>' + escapeHtml(ch) + ' (' + escapeHtml(m.name) + ')</option>';
+        const checked = assigned.some(a => a.castId === m.id && a.charName === ch) ? ' checked' : '';
+        html += '<label class="zd-actor-cb-row">'
+          + '<input type="checkbox" class="zd-actor-cb" value="' + escapeHtml(val) + '"' + checked + '>'
+          + '<span class="zd-actor-cb-dot" style="background:' + escapeHtml(m.color || '#5b9bd4') + '"></span>'
+          + '<span class="zd-actor-cb-label">' + escapeHtml(ch) + ' (' + escapeHtml(m.name) + ')</span>'
+          + '</label>';
       });
     });
-    actorSelect.innerHTML = opts;
-    // Explicitly set value — innerHTML + selected attribute is unreliable in some browsers
-    if (z.assignedCastId && z.assignedCharName) {
-      actorSelect.value = z.assignedCastId + '::' + z.assignedCharName;
-    }
+    actorListEl.innerHTML = html || '<div style="color:var(--text-muted);font-size:10px;padding:2px;">No cast members</div>';
   }
   if (focusText && t) requestAnimationFrame(() => { t.focus(); t.select(); });
 }
@@ -841,18 +851,24 @@ function zeApplyDetail() {
   if (z.isCharName) { z.isStageDirection = false; z.isMusicLine = false; }
   if (z.isStageDirection) { z.isCharName = false; z.isMusicLine = false; }
   if (z.isMusicLine) { z.isCharName = false; z.isStageDirection = false; }
-  // Actor assignment
-  const actorVal = document.getElementById('zd-actor')?.value || '';
-  if (actorVal) {
-    const [cid, cname] = actorVal.split('::');
-    z.assignedCastId = cid;
-    z.assignedCharName = cname;
+  // Actor assignment — multi-select via checkboxes
+  const actorCbs = document.querySelectorAll('#zd-actor-list .zd-actor-cb:checked');
+  const actors = [];
+  actorCbs.forEach(cb => {
+    const [cid, cname] = cb.value.split('::');
+    if (cid && cname) actors.push({ castId: cid, charName: cname });
+  });
+  z.assignedActors = actors;
+  // Legacy compat: first actor or null
+  if (actors.length > 0) {
+    z.assignedCastId = actors[0].castId;
+    z.assignedCharName = actors[0].charName;
   } else {
     z.assignedCastId = null;
     z.assignedCharName = null;
   }
-  // Clear actor if zone is charName or stageDir
-  if (z.isCharName || z.isStageDirection) { z.assignedCastId = null; z.assignedCharName = null; }
+  // Clear actor only for stageDir (charName zones CAN have actor assignments)
+  if (z.isStageDirection) { z.assignedActors = []; z.assignedCastId = null; z.assignedCharName = null; }
   zeRenderZones(); zeUpdateListPanel(); zeSelectZone(zeSelectedIdx); debounceSaveZones();
   toast('Zone updated');
 }

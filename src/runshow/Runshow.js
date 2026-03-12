@@ -1337,7 +1337,30 @@ function rsRenderLineZones(zKey) {
   );
 
   zones.forEach((zone, idx) => {
-    if (zone.isCharName) return;
+    if (zone.isCharName) {
+      // Render floating actor pill(s) for charName zones (zone div itself stays hidden)
+      if (rsShowActorPills) {
+        const _cnActors = zone.assignedActors && zone.assignedActors.length > 0
+          ? zone.assignedActors
+          : (zone.assignedCastId && zone.assignedCharName ? [{ castId: zone.assignedCastId, charName: zone.assignedCharName }] : []);
+        if (_cnActors.length > 0) {
+          const _cnCast = getCastMembers();
+          const pillWrap = document.createElement('div');
+          pillWrap.style.cssText = 'position:absolute;left:' + Math.max(0, zone.x - 0.5) + '%;top:' + zone.y + '%;display:flex;flex-direction:column;align-items:flex-end;pointer-events:none;z-index:4;';
+          _cnActors.forEach(a => {
+            const pill = document.createElement('span');
+            pill.className = 'rs-actor-pill--charname';
+            const _m = _cnCast.find(m => m.id === a.castId);
+            pill.style.background = _m?.color || '#5b9bd4';
+            pill.style.color = '#fff';
+            pill.textContent = a.charName;
+            pillWrap.appendChild(pill);
+          });
+          hitOverlay.appendChild(pillWrap);
+        }
+      }
+      return;
+    }
     if (zone.isStageDirection) {
       const sd = document.createElement('div');
       sd.style.cssText = `position:absolute;left:${zone.x}%;top:${zone.y}%;width:${zone.w}%;height:${Math.max(zone.h,1.5)}%;border-left:2px solid rgba(154,148,136,0.3);pointer-events:none;`;
@@ -1360,17 +1383,23 @@ function rsRenderLineZones(zKey) {
     label.className = 'zone-label';
     label.textContent = zone.text ? zone.text.substring(0, 40) : `zone ${idx}`;
     div.appendChild(label);
-    // Actor pill (when toggled on and zone has assignment)
-    if (rsShowActorPills && zone.assignedCharName) {
-      const cast = getCastMembers();
-      const member = cast.find(m => m.id === zone.assignedCastId);
-      const pillColor = member?.color || '#5b9bd4';
-      const pill = document.createElement('span');
-      pill.className = 'rs-actor-pill';
-      pill.style.background = pillColor;
-      pill.style.color = '#fff';
-      pill.textContent = zone.assignedCharName;
-      div.appendChild(pill);
+    // Actor pill(s) (when toggled on — supports multiple actors)
+    if (rsShowActorPills) {
+      const _rsActors = zone.assignedActors && zone.assignedActors.length > 0
+        ? zone.assignedActors
+        : (zone.assignedCastId && zone.assignedCharName ? [{ castId: zone.assignedCastId, charName: zone.assignedCharName }] : []);
+      if (_rsActors.length > 0) {
+        const cast = getCastMembers();
+        _rsActors.forEach(a => {
+          const member = cast.find(m => m.id === a.castId);
+          const pill = document.createElement('span');
+          pill.className = 'rs-actor-pill';
+          pill.style.background = member?.color || '#5b9bd4';
+          pill.style.color = '#fff';
+          pill.textContent = a.charName;
+          div.appendChild(pill);
+        });
+      }
     }
     hitOverlay.appendChild(div);
   });

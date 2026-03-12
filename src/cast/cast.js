@@ -145,10 +145,14 @@ async function buildActorLineReport(castId, charNames) {
     zonesSnap.docs.forEach(docSnap => {
       const pageKey = docSnap.id;
       const zones = docSnap.data().zones || [];
-      const matching = zones.filter(z =>
-        z.assignedCastId === castId && charNames.includes(z.assignedCharName)
-        && !z.isCharName && !z.isStageDirection
-      );
+      const matching = zones.filter(z => {
+        if (z.isStageDirection) return false;
+        // Check new multi-actor array first, fall back to legacy fields
+        const actors = z.assignedActors && z.assignedActors.length > 0
+          ? z.assignedActors
+          : (z.assignedCastId && z.assignedCharName ? [{ castId: z.assignedCastId, charName: z.assignedCharName }] : []);
+        return actors.some(a => a.castId === castId && charNames.includes(a.charName));
+      });
       if (matching.length > 0) {
         pages.push({
           pageKey,

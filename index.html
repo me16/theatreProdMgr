@@ -694,7 +694,7 @@
       border-radius: 8px; padding: 0; width: 260px;
       box-shadow: 0 12px 40px rgba(0,0,0,0.7); display: none;
       font-family: 'Inter', sans-serif; overflow: hidden;
-      flex-direction: column;
+      flex-direction: column; max-height: calc(100vh - 40px);
     }
     .note-popover.open { display: flex; flex-direction: column; }
     /* Line text preview at top */
@@ -711,7 +711,7 @@
       text-transform: uppercase; color: #3d3a36; padding: 8px 14px 4px;
     }
     /* Cast selector */
-    .popover-chars { display: flex; flex-direction: column; gap: 2px; padding: 0 8px 6px; }
+    .popover-chars { display: flex; flex-direction: column; gap: 2px; padding: 0 8px 6px; max-height: 40vh; overflow-y: auto; }
     .popover-char {
       display: flex; align-items: center; gap: 8px; padding: 5px 8px;
       background: transparent; border: 1px solid transparent; border-radius: 4px;
@@ -954,8 +954,9 @@
       background:var(--bg-card); border:1px solid var(--bg-border); border-radius:10px;
       width:300px; box-shadow:0 12px 40px rgba(0,0,0,0.7);
       font-family:'Inter',sans-serif; overflow:hidden;
+      max-height:calc(100vh - 100px); display:flex; flex-direction:column;
     }
-    .run-note-popover-inner { padding:14px; display:flex; flex-direction:column; gap:10px; }
+    .run-note-popover-inner { padding:14px; display:flex; flex-direction:column; gap:10px; overflow:hidden; flex:1; min-height:0; }
     .rnp-page-label { font-family:'DM Mono',monospace; font-size:11px; color:var(--text-muted); letter-spacing:0.08em; }
 
     /* Run report modal */

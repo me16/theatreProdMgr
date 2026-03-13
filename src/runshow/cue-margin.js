@@ -52,16 +52,55 @@ function _assignDefaultPositions(cues) {
 export function renderMarginCues(cues, page, half, overlayEl, canvasWidth, onCueClick) {
   if (!overlayEl || !cues.length) return;
 
-  // Remove any existing margin cues before rendering
+  // Remove any existing margin cues and connector SVG
   overlayEl.querySelectorAll('.rs-cue-marker').forEach(el => el.remove());
+  overlayEl.querySelectorAll('.rs-cue-connector-svg').forEach(el => el.remove());
 
   _assignDefaultPositions(cues);
+
+  // SVG overlay for connector lines (percentage-based viewBox)
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.classList.add('rs-cue-connector-svg');
+  svg.setAttribute('viewBox', '0 0 100 100');
+  svg.setAttribute('preserveAspectRatio', 'none');
+  svg.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:14;overflow:visible;';
+  overlayEl.appendChild(svg);
 
   cues.forEach(cue => {
     const y = cue.yPosition != null ? cue.yPosition : (cue.bounds?.y ?? cue._computedY ?? 10);
     const side = cue.xSide || 'left';
     const { bg, fg } = _typeColor(cue.type);
 
+    // --- SVG connector line (if anchor exists) ---
+    if (cue.anchorX != null && cue.anchorY != null) {
+      const edgeX = side === 'left' ? 0 : 100;
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.classList.add('rs-connector-line');
+      line.dataset.cueId = cue.id;
+      line.setAttribute('x1', cue.anchorX);
+      line.setAttribute('y1', cue.anchorY);
+      line.setAttribute('x2', edgeX);
+      line.setAttribute('y2', y);
+      line.setAttribute('stroke', fg);
+      line.setAttribute('stroke-width', '0.4');
+      line.setAttribute('stroke-dasharray', '1.2,0.6');
+      line.setAttribute('stroke-opacity', '0.8');
+      line.setAttribute('vector-effect', 'non-scaling-stroke');
+      svg.appendChild(line);
+
+      // Anchor dot
+      const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      dot.classList.add('rs-connector-dot');
+      dot.dataset.cueId = cue.id;
+      dot.setAttribute('cx', cue.anchorX);
+      dot.setAttribute('cy', cue.anchorY);
+      dot.setAttribute('r', '1');
+      dot.setAttribute('fill', fg);
+      dot.setAttribute('fill-opacity', '1');
+      svg.appendChild(dot);
+    }
+
+    // --- Marker pill ---
     const marker = document.createElement('div');
     marker.className = 'rs-cue-marker';
     marker.dataset.cueId = cue.id;
@@ -96,25 +135,17 @@ export function renderMarginCues(cues, page, half, overlayEl, canvasWidth, onCue
       marker.style.color = '#fff';
     }
 
-    // Connector line from marker to page edge
-    const connector = document.createElement('div');
-    connector.className = 'rs-cue-connector';
-    connector.style.cssText = [
-      'position:absolute',
-      'top:50%',
-      side === 'right' ? 'left:-6px' : 'right:-6px',
-      'width:6px',
-      'height:0',
-      'border-top:1px dashed ' + fg,
-      'opacity:0.4',
-    ].join(';');
-    marker.appendChild(connector);
-
     marker.addEventListener('click', e => {
       e.stopPropagation();
-      // Highlight selected
       overlayEl.querySelectorAll('.rs-cue-marker').forEach(el => el.classList.remove('rs-cue-marker--selected'));
       marker.classList.add('rs-cue-marker--selected');
+      // Highlight this cue's connector
+      svg.querySelectorAll('.rs-connector-line').forEach(l => l.classList.remove('rs-connector-line--active'));
+      svg.querySelectorAll('.rs-connector-dot').forEach(d => d.classList.remove('rs-connector-dot--active'));
+      const myLine = svg.querySelector('.rs-connector-line[data-cue-id="' + cue.id + '"]');
+      const myDot = svg.querySelector('.rs-connector-dot[data-cue-id="' + cue.id + '"]');
+      if (myLine) myLine.classList.add('rs-connector-line--active');
+      if (myDot) myDot.classList.add('rs-connector-dot--active');
       if (onCueClick) onCueClick(cue);
     });
 

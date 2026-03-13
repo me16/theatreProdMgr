@@ -1006,6 +1006,15 @@
     .rs-cue-marker:hover { transform:scale(1.08); box-shadow:0 4px 12px rgba(0,0,0,0.4); z-index:20; }
     .rs-cue-marker--selected { outline:2px solid #fff; outline-offset:1px; z-index:21; }
     .rs-cue-marker--called { opacity:0.7; }
+    /* ===== Run Show connector lines (SVG) ===== */
+    .rs-cue-connector-svg {
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+      pointer-events: none; z-index: 14; overflow: visible;
+    }
+    .rs-connector-line { transition: stroke-opacity 0.2s; }
+    .rs-connector-line--active { stroke-opacity: 1 !important; stroke-dasharray: none !important; }
+    .rs-connector-dot { transition: fill-opacity 0.2s; }
+    .rs-connector-dot--active { fill-opacity: 1 !important; }
     .rs-cue-go-btn {
       width:100%; padding:10px; margin-top:8px; background:var(--green); color:#fff; border:none;
       border-radius:6px; font-size:14px; font-weight:600; cursor:pointer; transition:background 0.2s;
@@ -1345,6 +1354,22 @@
     }
     .ze-cue-marker--selected { outline: 2px solid var(--gold); outline-offset: 1px; }
 
+    /* ===== CUE CONNECTOR LINES (SVG in zone editor) ===== */
+    .ze-cue-connector-svg {
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+      pointer-events: none; z-index: 14; overflow: visible;
+    }
+    .ze-connector-line { transition: stroke-opacity 0.2s; }
+    .ze-connector-line--active { stroke-opacity: 1 !important; stroke-dasharray: none !important; }
+    .ze-connector-dot { transition: fill-opacity 0.2s; }
+    .ze-connector-dot--active { fill-opacity: 1 !important; }
+
+    /* Connector-draw mode cursor */
+    .ze-connector-draw-active { cursor: crosshair !important; }
+    .ze-connector-draw-active .ze-zone { pointer-events: none !important; }
+    .ze-connector-draw-active .ze-resize { pointer-events: none !important; }
+    .ze-connector-draw-active .ze-cue-marker { pointer-events: none !important; }
+
     /* Place-Cue mode cursor */
     .ze-cue-mode-active { cursor: crosshair !important; }
     .ze-cue-mode-active .ze-zone { pointer-events: none !important; }
@@ -1632,6 +1657,13 @@
                 <button id="ze-cue-cancel" class="ze-tool-btn" style="padding:5px 12px;">Cancel</button>
                 <button id="ze-cue-save" class="ze-tool-btn ze-accent" style="padding:5px 12px;">Add Cue</button>
               </div>
+            </div>
+            <!-- Cue action popover (click existing marker) -->
+            <div id="ze-cue-action-popover" style="display:none;position:absolute;z-index:55;background:var(--bg-card);border:1px solid var(--bg-border);border-radius:8px;box-shadow:0 8px 32px rgba(0,0,0,0.5);padding:10px;width:180px;">
+              <div id="ze-cue-action-title" style="font-family:'DM Mono',monospace;font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></div>
+              <button id="ze-cue-action-draw" class="ze-tool-btn" style="width:100%;padding:5px 8px;margin-bottom:4px;font-size:11px;">Draw Connector</button>
+              <button id="ze-cue-action-remove" class="ze-tool-btn" style="width:100%;padding:5px 8px;margin-bottom:4px;font-size:11px;display:none;">Remove Connector</button>
+              <button id="ze-cue-action-delete" class="ze-tool-btn" style="width:100%;padding:5px 8px;font-size:11px;color:#e63946;">Delete Cue</button>
             </div>
           </div>
         </div>

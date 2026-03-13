@@ -207,6 +207,22 @@ export function initLineNotes() {
     if (e.key === 'Enter') { e.preventDefault(); zeSavePlacedCue(); }
     if (e.key === 'Escape') zeCloseCuePopover();
   });
+
+  // Cue action popover buttons (connector draw, remove, delete)
+  document.getElementById('ze-cue-action-draw')?.addEventListener('click', zeStartConnectorDraw);
+  document.getElementById('ze-cue-action-remove')?.addEventListener('click', zeRemoveConnector);
+  document.getElementById('ze-cue-action-delete')?.addEventListener('click', zeDeleteCueFromPopover);
+
+  // Escape key cancels connector-draw mode
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && zeConnectorDrawCueId) {
+      zeCancelConnectorDraw();
+      toast('Connector draw cancelled.', 'info');
+    }
+    if (e.key === 'Escape' && zeActionPopoverCueId) {
+      zeCloseCueActionPopover();
+    }
+  });
 }
 
 export async function onLineNotesTabActivated() {
@@ -735,6 +751,14 @@ function zeHandleMouseMove(e) {
 function zeOverlayMouseDown(e) {
   if (e.target !== document.getElementById('ze-edit-overlay')) return;
   if (e.button !== 0) return;
+  // Close cue action popover on any overlay click
+  zeCloseCueActionPopover();
+  // Connector-draw mode: place the anchor point
+  if (zeConnectorDrawCueId) {
+    e.preventDefault(); e.stopPropagation();
+    zeHandleConnectorPlace(e);
+    return;
+  }
   // Cue placement mode: intercept click to place a cue marker
   if (zeCueMode) {
     e.preventDefault(); e.stopPropagation();
@@ -1224,6 +1248,10 @@ const ZE_CUE_COLORS = {
   OTHER: { bg: '#2E2C29', fg: '#9A9488', border: '#9A9488' },
 };
 
+// Connector-draw state
+let zeConnectorDrawCueId = null;   // cue ID we're drawing a connector for
+let zeActionPopoverCueId = null;   // cue ID whose action popover is open
+
 function zeToggleCueMode() {
   zeCueMode = !zeCueMode;
   const btn = document.getElementById('ln-place-cue-btn');
@@ -1263,6 +1291,123 @@ function zeCloseCuePopover() {
   const pop = document.getElementById('ze-cue-popover');
   if (pop) pop.style.display = 'none';
   zeCuePending = null;
+}
+
+/* ───────────────────────────────────────────────────────
+   CUE ACTION POPOVER (click existing marker)
+   ─────────────────────────────────────────────────────── */
+function zeShowCueActionPopover(cue, markerEl) {
+  zeCloseCueActionPopover(); // close any previous
+  zeActionPopoverCueId = cue.id;
+  const pop = document.getElementById('ze-cue-action-popover');
+  if (!pop) return;
+  const wrapper = document.getElementById('ze-page-wrapper');
+  if (!wrapper) return;
+
+  // Title
+  const titleEl = document.getElementById('ze-cue-action-title');
+  if (titleEl) titleEl.textContent = (cue.type || '') + ' ' + (cue.label || '');
+
+  // Toggle remove-connector visibility
+  const removeBtn = document.getElementById('ze-cue-action-remove');
+  if (removeBtn) removeBtn.style.display = (cue.anchorX != null && cue.anchorY != null) ? '' : 'none';
+
+  // Position near the marker
+  const wrapRect = wrapper.getBoundingClientRect();
+  const markRect = markerEl.getBoundingClientRect();
+  let left = markRect.left - wrapRect.left + markerEl.offsetWidth + 8;
+  let top = markRect.top - wrapRect.top - 4;
+  const wW = wrapper.offsetWidth, wH = wrapper.offsetHeight;
+  if (left + 190 > wW) left = Math.max(4, markRect.left - wrapRect.left - 190);
+  if (top + 130 > wH) top = Math.max(4, wH - 134);
+  if (top < 4) top = 4;
+  pop.style.left = left + 'px';
+  pop.style.top = top + 'px';
+  pop.style.display = 'block';
+}
+
+function zeCloseCueActionPopover() {
+  const pop = document.getElementById('ze-cue-action-popover');
+  if (pop) pop.style.display = 'none';
+  zeActionPopoverCueId = null;
+}
+
+/* ───────────────────────────────────────────────────────
+   CONNECTOR DRAW MODE
+   ─────────────────────────────────────────────────────── */
+function zeStartConnectorDraw() {
+  const cueId = zeActionPopoverCueId;
+  if (!cueId) return;
+  zeCloseCueActionPopover();
+  zeConnectorDrawCueId = cueId;
+  const overlay = document.getElementById('ze-edit-overlay');
+  if (overlay) overlay.classList.add('ze-connector-draw-active');
+  toast('Click a spot on the page to anchor the connector line', 'info');
+}
+
+function zeCancelConnectorDraw() {
+  zeConnectorDrawCueId = null;
+  const overlay = document.getElementById('ze-edit-overlay');
+  if (overlay) overlay.classList.remove('ze-connector-draw-active');
+}
+
+async function zeHandleConnectorPlace(e) {
+  if (!zeConnectorDrawCueId) return;
+  const cueId = zeConnectorDrawCueId;
+  zeCancelConnectorDraw();
+
+  const wrapper = document.getElementById('ze-page-wrapper');
+  if (!wrapper) return;
+  const rect = wrapper.getBoundingClientRect();
+  const xPct = ((e.clientX - rect.left) / rect.width) * 100;
+  const yPct = ((e.clientY - rect.top) / rect.height) * 100;
+
+  const pid = state.activeProduction?.id;
+  if (!pid) return;
+  try {
+    await updateDoc(doc(db, 'productions', pid, 'scriptCues', cueId), {
+      anchorX: Math.round(xPct * 100) / 100,
+      anchorY: Math.round(yPct * 100) / 100,
+    });
+    toast('Connector placed.', 'success');
+  } catch (err) {
+    console.error('Failed to save connector:', err);
+    toast('Failed to save connector.', 'error');
+  }
+  // Snapshot listener will re-render markers + connector automatically
+}
+
+async function zeRemoveConnector() {
+  const cueId = zeActionPopoverCueId;
+  if (!cueId) return;
+  zeCloseCueActionPopover();
+  const pid = state.activeProduction?.id;
+  if (!pid) return;
+  try {
+    await updateDoc(doc(db, 'productions', pid, 'scriptCues', cueId), {
+      anchorX: null,
+      anchorY: null,
+    });
+    toast('Connector removed.', 'success');
+  } catch (err) {
+    toast('Failed to remove connector.', 'error');
+  }
+}
+
+async function zeDeleteCueFromPopover() {
+  const cueId = zeActionPopoverCueId;
+  if (!cueId) return;
+  zeCloseCueActionPopover();
+  if (!isOwner()) { toast('Only the owner can delete cues.', 'error'); return; }
+  if (!confirmDialog('Delete this cue?')) return;
+  const pid = state.activeProduction?.id;
+  if (!pid) return;
+  try {
+    await deleteDoc(doc(db, 'productions', pid, 'scriptCues', cueId));
+    toast('Cue deleted.', 'success');
+  } catch (e) {
+    toast('Failed to delete cue.', 'error');
+  }
 }
 
 async function zeSavePlacedCue() {
@@ -1312,8 +1457,9 @@ async function zeSavePlacedCue() {
 function zeRenderCueMarkers() {
   const ovl = document.getElementById('ze-edit-overlay');
   if (!ovl) return;
-  // Remove old cue markers
+  // Remove old cue markers and connector SVG
   ovl.querySelectorAll('.ze-cue-marker').forEach(el => el.remove());
+  ovl.querySelectorAll('.ze-cue-connector-svg').forEach(el => el.remove());
   // Determine current script page
   const scriptLabel = pdfPageToScriptLabel(currentPage, currentHalf);
   const scriptPageNum = parseInt(scriptLabel, 10);
@@ -1321,9 +1467,46 @@ function zeRenderCueMarkers() {
   const pageCues = scriptCues.filter(c => c.page === scriptPageNum);
   if (pageCues.length === 0) return;
 
+  // SVG overlay for connector lines (percentage-based viewBox)
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.classList.add('ze-cue-connector-svg');
+  svg.setAttribute('viewBox', '0 0 100 100');
+  svg.setAttribute('preserveAspectRatio', 'none');
+  ovl.appendChild(svg);
+
   pageCues.forEach(cue => {
     const colors = ZE_CUE_COLORS[cue.type] || ZE_CUE_COLORS.OTHER;
     const yPct = cue.bounds?.y ?? cue.yPosition ?? 10;
+
+    // --- Connector line (if anchor exists) ---
+    if (cue.anchorX != null && cue.anchorY != null) {
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.classList.add('ze-connector-line');
+      line.dataset.cueId = cue.id;
+      line.setAttribute('x1', cue.anchorX);
+      line.setAttribute('y1', cue.anchorY);
+      line.setAttribute('x2', 0);
+      line.setAttribute('y2', yPct);
+      line.setAttribute('stroke', colors.fg);
+      line.setAttribute('stroke-width', '0.4');
+      line.setAttribute('stroke-dasharray', '1.2,0.6');
+      line.setAttribute('stroke-opacity', '0.85');
+      line.setAttribute('vector-effect', 'non-scaling-stroke');
+      svg.appendChild(line);
+
+      // Anchor dot
+      const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      dot.classList.add('ze-connector-dot');
+      dot.dataset.cueId = cue.id;
+      dot.setAttribute('cx', cue.anchorX);
+      dot.setAttribute('cy', cue.anchorY);
+      dot.setAttribute('r', '1');
+      dot.setAttribute('fill', colors.fg);
+      dot.setAttribute('fill-opacity', '1');
+      svg.appendChild(dot);
+    }
+
+    // --- Cue marker pill ---
     const marker = document.createElement('div');
     marker.className = 'ze-cue-marker';
     marker.dataset.cueId = cue.id;
@@ -1338,6 +1521,15 @@ function zeRenderCueMarkers() {
       // Highlight selected
       ovl.querySelectorAll('.ze-cue-marker').forEach(el => el.classList.remove('ze-cue-marker--selected'));
       marker.classList.add('ze-cue-marker--selected');
+      // Highlight connector
+      svg.querySelectorAll('.ze-connector-line').forEach(l => l.classList.remove('ze-connector-line--active'));
+      svg.querySelectorAll('.ze-connector-dot').forEach(d => d.classList.remove('ze-connector-dot--active'));
+      const myLine = svg.querySelector('.ze-connector-line[data-cue-id="' + cue.id + '"]');
+      const myDot = svg.querySelector('.ze-connector-dot[data-cue-id="' + cue.id + '"]');
+      if (myLine) myLine.classList.add('ze-connector-line--active');
+      if (myDot) myDot.classList.add('ze-connector-dot--active');
+      // Show action popover
+      zeShowCueActionPopover(cue, marker);
     });
     ovl.appendChild(marker);
   });

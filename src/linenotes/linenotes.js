@@ -68,6 +68,10 @@ let zeDrawStart = null;
 let zeDragState = null;
 let zeRenderGen = 0;
 
+// Cue placement mode state
+let zeCueMode = false;
+let zeCuePending = null; // { xPct, yPct } — click position awaiting popover save
+
 export function getPdfDoc()         { return pdfDoc; }
 export function getPdfScale()       { return pdfScale; }
 export function getLineZones()      { return lineZones; }
@@ -194,6 +198,15 @@ export function initLineNotes() {
 
   // Wire zone editor toolbar
   setTimeout(() => wireZeToolbar(), 0);
+
+  // Cue placement mode: button + popover wiring
+  document.getElementById('ln-place-cue-btn')?.addEventListener('click', zeToggleCueMode);
+  document.getElementById('ze-cue-save')?.addEventListener('click', zeSavePlacedCue);
+  document.getElementById('ze-cue-cancel')?.addEventListener('click', zeCloseCuePopover);
+  document.getElementById('ze-cue-label')?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); zeSavePlacedCue(); }
+    if (e.key === 'Escape') zeCloseCuePopover();
+  });
 }
 
 export async function onLineNotesTabActivated() {
@@ -569,6 +582,8 @@ async function renderZoneEditorPage(num) {
   const gen = ++zeRenderGen;
   zeSelectedIdx = null;
   zeMultiSelected.clear();
+  // Close cue popover on page change (but don't exit cue mode)
+  zeCloseCuePopover();
   document.getElementById('ze-detail')?.classList.remove('visible');
   document.getElementById('ze-multi-bar')?.classList.remove('visible');
 
@@ -604,6 +619,7 @@ async function renderZoneEditorPage(num) {
   if (gen !== zeRenderGen) return;
 
   zeRenderZones();
+  zeRenderCueMarkers();
   zeUpdateListPanel();
 }
 
@@ -719,6 +735,18 @@ function zeHandleMouseMove(e) {
 function zeOverlayMouseDown(e) {
   if (e.target !== document.getElementById('ze-edit-overlay')) return;
   if (e.button !== 0) return;
+  // Cue placement mode: intercept click to place a cue marker
+  if (zeCueMode) {
+    e.preventDefault(); e.stopPropagation();
+    const wrapper = document.getElementById('ze-page-wrapper');
+    if (!wrapper) return;
+    const rect = wrapper.getBoundingClientRect();
+    const xPct = ((e.clientX - rect.left) / wrapper.offsetWidth) * 100;
+    const yPct = ((e.clientY - rect.top) / wrapper.offsetHeight) * 100;
+    zeCuePending = { xPct, yPct };
+    zeShowCuePopover(e.clientX - rect.left, e.clientY - rect.top);
+    return;
+  }
   const wrapper = document.getElementById('ze-page-wrapper');
   const rect = wrapper.getBoundingClientRect();
   zeDrawStart = { x: e.clientX - rect.left, y: e.clientY - rect.top };
@@ -1185,6 +1213,137 @@ document.addEventListener('keydown', e => {
 });
 
 /* ═══════════════════════════════════════════════════════════
+   CUE PLACEMENT MODE (click-to-place on zone editor canvas)
+   ═══════════════════════════════════════════════════════════ */
+const ZE_CUE_COLORS = {
+  LX:    { bg: '#1A2E50', fg: '#5B9BD4', border: '#5B9BD4' },
+  SQ:    { bg: '#2D1A14', fg: '#E63946', border: '#E63946' },
+  PX:    { bg: '#1A2A1A', fg: '#2D8A4E', border: '#2D8A4E' },
+  FLY:   { bg: '#2E2C29', fg: '#9A9488', border: '#9A9488' },
+  CARP:  { bg: '#2E2C29', fg: '#9A9488', border: '#9A9488' },
+  OTHER: { bg: '#2E2C29', fg: '#9A9488', border: '#9A9488' },
+};
+
+function zeToggleCueMode() {
+  zeCueMode = !zeCueMode;
+  const btn = document.getElementById('ln-place-cue-btn');
+  if (btn) btn.classList.toggle('ln-header-btn--active', zeCueMode);
+  const overlay = document.getElementById('ze-edit-overlay');
+  if (overlay) overlay.classList.toggle('ze-cue-mode-active', zeCueMode);
+  // Close any open popover when toggling off
+  if (!zeCueMode) zeCloseCuePopover();
+  toast(zeCueMode ? 'Cue mode ON — click the page to place a cue' : 'Cue mode OFF');
+}
+
+function zeShowCuePopover(pxX, pxY) {
+  const pop = document.getElementById('ze-cue-popover');
+  if (!pop) return;
+  // Position the popover near the click, but keep it within the wrapper
+  const wrapper = document.getElementById('ze-page-wrapper');
+  if (!wrapper) return;
+  const wW = wrapper.offsetWidth, wH = wrapper.offsetHeight;
+  // Default: place to the right and slightly above the click
+  let left = pxX + 12, top = pxY - 20;
+  // If it would overflow right, flip to left side of click
+  if (left + 250 > wW) left = Math.max(4, pxX - 256);
+  // If it would overflow bottom, push up
+  if (top + 220 > wH) top = Math.max(4, wH - 224);
+  if (top < 4) top = 4;
+  pop.style.left = left + 'px';
+  pop.style.top = top + 'px';
+  pop.style.display = 'block';
+  // Clear fields
+  const labelEl = document.getElementById('ze-cue-label');
+  if (labelEl) { labelEl.value = ''; labelEl.focus(); }
+  const descEl = document.getElementById('ze-cue-desc');
+  if (descEl) descEl.value = '';
+}
+
+function zeCloseCuePopover() {
+  const pop = document.getElementById('ze-cue-popover');
+  if (pop) pop.style.display = 'none';
+  zeCuePending = null;
+}
+
+async function zeSavePlacedCue() {
+  if (!zeCuePending) { zeCloseCuePopover(); return; }
+  if (!isOwner()) { toast('Only the owner can add cues.', 'error'); zeCloseCuePopover(); return; }
+  const pid = state.activeProduction?.id;
+  if (!pid) { zeCloseCuePopover(); return; }
+  const type = document.getElementById('ze-cue-type')?.value || 'OTHER';
+  const label = sanitizeName(document.getElementById('ze-cue-label')?.value || '');
+  if (!label) { toast('Label is required.', 'error'); return; }
+  const description = sanitizeName(document.getElementById('ze-cue-desc')?.value || '');
+  const page = parseInt(pdfPageToScriptLabel(currentPage, currentHalf), 10);
+  if (isNaN(page) || page < 1) { toast('Cannot place cue on a pre-script page.', 'error'); zeCloseCuePopover(); return; }
+  const bounds = {
+    x: zeCuePending.xPct,
+    y: zeCuePending.yPct,
+    w: 2,
+    h: 2,
+  };
+  const cueData = {
+    page,
+    half: '',
+    type,
+    label,
+    description,
+    xSide: zeCuePending.xPct < 50 ? 'left' : 'right',
+    yPosition: zeCuePending.yPct,
+    zoneIdx: null,
+    bounds,
+    createdAt: serverTimestamp(),
+  };
+  try {
+    await addDoc(collection(db, 'productions', pid, 'scriptCues'), cueData);
+    toast('Cue placed: ' + label, 'success');
+  } catch(e) {
+    console.error('Failed to save placed cue:', e);
+    toast('Failed to save cue.', 'error');
+  }
+  zeCloseCuePopover();
+  // scriptCues snapshot listener will re-render markers automatically
+}
+
+/**
+ * Render cue markers on the zone editor canvas overlay.
+ * Called from zeRenderZones (appended to end).
+ */
+function zeRenderCueMarkers() {
+  const ovl = document.getElementById('ze-edit-overlay');
+  if (!ovl) return;
+  // Remove old cue markers
+  ovl.querySelectorAll('.ze-cue-marker').forEach(el => el.remove());
+  // Determine current script page
+  const scriptLabel = pdfPageToScriptLabel(currentPage, currentHalf);
+  const scriptPageNum = parseInt(scriptLabel, 10);
+  if (isNaN(scriptPageNum) || scriptPageNum < 1) return;
+  const pageCues = scriptCues.filter(c => c.page === scriptPageNum);
+  if (pageCues.length === 0) return;
+
+  pageCues.forEach(cue => {
+    const colors = ZE_CUE_COLORS[cue.type] || ZE_CUE_COLORS.OTHER;
+    const yPct = cue.bounds?.y ?? cue.yPosition ?? 10;
+    const marker = document.createElement('div');
+    marker.className = 'ze-cue-marker';
+    marker.dataset.cueId = cue.id;
+    marker.style.top = yPct + '%';
+    marker.style.background = colors.bg;
+    marker.style.color = colors.fg;
+    marker.style.borderColor = colors.border;
+    marker.innerHTML = '<span class="ze-cue-type-tag">' + escapeHtml(cue.type) + '</span> ' + escapeHtml(cue.label || '');
+    marker.title = (cue.type || '') + ' ' + (cue.label || '') + (cue.description ? ' — ' + cue.description : '');
+    marker.addEventListener('click', (e) => {
+      e.stopPropagation();
+      // Highlight selected
+      ovl.querySelectorAll('.ze-cue-marker').forEach(el => el.classList.remove('ze-cue-marker--selected'));
+      marker.classList.add('ze-cue-marker--selected');
+    });
+    ovl.appendChild(marker);
+  });
+}
+
+/* ═══════════════════════════════════════════════════════════
    FEATURE 5: SCRIPT CUES
    ═══════════════════════════════════════════════════════════ */
 function subscribeToScriptCues() {
@@ -1195,6 +1354,8 @@ function subscribeToScriptCues() {
     scriptCues = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     scriptCues.sort((a, b) => (a.page || 0) - (b.page || 0));
     if (activeLnSubtab === 'cues') renderCuesPanel();
+    // Always refresh cue markers on the zone editor canvas
+    zeRenderCueMarkers();
   });
   state.unsubscribers.push(() => { if (scriptCuesUnsub) { scriptCuesUnsub(); scriptCuesUnsub = null; } });
 }

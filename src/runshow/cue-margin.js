@@ -31,7 +31,7 @@ function _typeColor(type) {
  * Spaces them evenly in the top 80% of the page.
  */
 function _assignDefaultPositions(cues) {
-  const needsY = cues.filter(c => c.yPosition == null);
+  const needsY = cues.filter(c => c.yPosition == null && c.bounds?.y == null);
   if (needsY.length === 0) return;
   const step = 80 / (needsY.length + 1);
   needsY.forEach((c, i) => {
@@ -58,7 +58,7 @@ export function renderMarginCues(cues, page, half, overlayEl, canvasWidth, onCue
   _assignDefaultPositions(cues);
 
   cues.forEach(cue => {
-    const y = cue.yPosition != null ? cue.yPosition : (cue._computedY || 10);
+    const y = cue.yPosition != null ? cue.yPosition : (cue.bounds?.y ?? cue._computedY ?? 10);
     const side = cue.xSide || 'left';
     const { bg, fg } = _typeColor(cue.type);
 

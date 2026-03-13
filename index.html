@@ -1329,6 +1329,27 @@
     .zd-actor-cb-dot {
       width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
     }
+
+    /* ===== CUE PLACEMENT MARKERS (Zone Editor) ===== */
+    .ze-cue-marker {
+      position: absolute; left: 0; height: 18px; display: flex; align-items: center;
+      padding: 0 8px 0 4px; border-radius: 0 9px 9px 0; cursor: pointer;
+      font-family: 'DM Mono', monospace; font-size: 9px; font-weight: 600;
+      white-space: nowrap; z-index: 15; pointer-events: all;
+      transition: opacity 0.15s, transform 0.15s; transform-origin: left center;
+      border: 1px solid; border-left: 3px solid;
+    }
+    .ze-cue-marker:hover { transform: scale(1.05); z-index: 20; }
+    .ze-cue-marker .ze-cue-type-tag {
+      font-size: 8px; opacity: 0.7; margin-right: 4px;
+    }
+    .ze-cue-marker--selected { outline: 2px solid var(--gold); outline-offset: 1px; }
+
+    /* Place-Cue mode cursor */
+    .ze-cue-mode-active { cursor: crosshair !important; }
+    .ze-cue-mode-active .ze-zone { pointer-events: none !important; }
+    .ze-cue-mode-active .ze-resize { pointer-events: none !important; }
+    #ln-place-cue-btn.ln-header-btn--active { background: var(--gold); color: var(--bg-deep); }
     </style>
 </head>
 <body>
@@ -1574,6 +1595,7 @@
       <button class="ln-header-btn" id="ln-set-page1-btn" title="Mark the current PDF page as script page 1 (sets the page number offset)">Set p.1 here</button>
       <button class="ln-header-btn" id="ln-split-btn">2-up</button>
       <button class="ln-header-btn ln-header-btn--active" id="ln-view-zones-btn">Zones</button>
+      <button class="ln-header-btn" id="ln-place-cue-btn" title="Click a spot on the page to place a script cue">Place Cue</button>
     </div>
 
     <div class="ln-body">
@@ -1587,6 +1609,29 @@
             <canvas id="ze-canvas" style="display:block;background:#faf8f3;"></canvas>
             <div id="ze-edit-overlay" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:all;">
               <div id="ze-rubber-band" style="position:absolute;border:1.5px dashed #e8c98e;background:rgba(232,201,142,0.1);border-radius:2px;pointer-events:none;display:none;z-index:30;"></div>
+            </div>
+            <!-- Cue placement popover -->
+            <div id="ze-cue-popover" style="display:none;position:absolute;z-index:50;background:var(--bg-card);border:1px solid var(--bg-border);border-radius:8px;box-shadow:0 8px 32px rgba(0,0,0,0.5);padding:14px;width:240px;">
+              <div style="font-family:'DM Mono',monospace;font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-muted);margin-bottom:10px;">Place Cue</div>
+              <div style="margin-bottom:8px;">
+                <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:3px;">Type</label>
+                <select id="ze-cue-type" class="form-select" style="width:100%;padding:5px 8px;background:var(--bg-raised);border:1px solid var(--bg-border);color:var(--text-primary);border-radius:4px;font-size:12px;">
+                  <option value="LX">LX</option><option value="SQ">SQ</option><option value="PX">PX</option>
+                  <option value="FLY">FLY</option><option value="CARP">CARP</option><option value="OTHER">OTHER</option>
+                </select>
+              </div>
+              <div style="margin-bottom:8px;">
+                <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:3px;">Label</label>
+                <input id="ze-cue-label" type="text" maxlength="100" placeholder="e.g. LX 42" class="ze-input" style="width:100%;box-sizing:border-box;">
+              </div>
+              <div style="margin-bottom:10px;">
+                <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:3px;">Description (optional)</label>
+                <input id="ze-cue-desc" type="text" maxlength="250" placeholder="" class="ze-input" style="width:100%;box-sizing:border-box;">
+              </div>
+              <div style="display:flex;gap:6px;justify-content:flex-end;">
+                <button id="ze-cue-cancel" class="ze-tool-btn" style="padding:5px 12px;">Cancel</button>
+                <button id="ze-cue-save" class="ze-tool-btn ze-accent" style="padding:5px 12px;">Add Cue</button>
+              </div>
             </div>
           </div>
         </div>

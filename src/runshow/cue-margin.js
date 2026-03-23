@@ -100,22 +100,30 @@ export function renderMarginCues(cues, page, half, overlayEl, canvasWidth, onCue
       svg.appendChild(dot);
     }
 
-    // --- Marker pill ---
+    // --- Marker pill (numeric size scaling) ---
+    // Backward compat: string values → numeric equivalents
+    const _rawSz = cue.size;
+    const sizeNum = typeof _rawSz === 'number' ? _rawSz : ({ sm: 75, md: 100, lg: 130 }[_rawSz] || 100);
+    const _s = sizeNum / 100;
+    const _w = Math.round(46 * _s);
+    const _h = Math.round(18 * _s);
+    const _fs = Math.max(7, Math.round(10 * _s));
+    const _off = _w + 6;
     const marker = document.createElement('div');
     marker.className = 'rs-cue-marker';
     marker.dataset.cueId = cue.id;
     marker.style.cssText = [
       'position:absolute',
       'top:' + y + '%',
-      side === 'right' ? 'right:-52px' : 'left:-52px',
-      'width:46px',
-      'height:18px',
-      'border-radius:9px',
+      side === 'right' ? 'right:-' + _off + 'px' : 'left:-' + _off + 'px',
+      'width:' + _w + 'px',
+      'height:' + _h + 'px',
+      'border-radius:' + Math.round(_h / 2) + 'px',
       'display:flex',
       'align-items:center',
       'justify-content:center',
       'font-family:"DM Mono",monospace',
-      'font-size:10px',
+      'font-size:' + sz.fs + 'px',
       'font-weight:500',
       'cursor:pointer',
       'z-index:15',

@@ -1285,6 +1285,13 @@ function zeShowCuePopover(pxX, pxY) {
   if (labelEl) { labelEl.value = ''; labelEl.focus(); }
   const descEl = document.getElementById('ze-cue-desc');
   if (descEl) descEl.value = '';
+  // Reset size to default preset
+  const _szPre = document.getElementById('ze-cue-size-preset');
+  if (_szPre) _szPre.value = '200';
+  const _szCRow = document.getElementById('ze-cue-size-custom-row');
+  if (_szCRow) _szCRow.style.display = 'none';
+  const _szCust = document.getElementById('ze-cue-size-custom');
+  if (_szCust) _szCust.value = '100';
 }
 
 function zeCloseCuePopover() {
@@ -1307,6 +1314,53 @@ function zeShowCueActionPopover(cue, markerEl) {
   // Title
   const titleEl = document.getElementById('ze-cue-action-title');
   if (titleEl) titleEl.textContent = (cue.type || '') + ' ' + (cue.label || '');
+
+  // Size controls — S/M/L instant-save presets + custom input + Set
+  const _curRaw = cue.size;
+  const _curNum = typeof _curRaw === 'number' ? _curRaw : ({ sm: 75, md: 100, lg: 130 }[_curRaw] || 100);
+  // Populate custom input
+  const sizeInput = document.getElementById('ze-cue-action-size');
+  if (sizeInput) sizeInput.value = _curNum;
+  // Highlight matching preset, wire instant-save
+  const presetBtns = pop.querySelectorAll('.ze-cue-action-preset');
+  presetBtns.forEach(btn => {
+    const match = parseInt(btn.dataset.val, 10) === _curNum;
+    btn.style.background = match ? 'var(--gold)' : '';
+    btn.style.color = match ? 'var(--bg-deep)' : '';
+    const fresh = btn.cloneNode(true);
+    fresh.style.background = btn.style.background;
+    fresh.style.color = btn.style.color;
+    fresh.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const newSize = parseInt(fresh.dataset.val, 10);
+      const pid = state.activeProduction?.id;
+      if (!pid || !isOwner()) { toast('Only the owner can resize cues.', 'error'); return; }
+      try {
+        await updateDoc(doc(db, 'productions', pid, 'scriptCues', cue.id), { size: newSize });
+        toast('Cue size set to ' + newSize, 'success');
+        zeCloseCueActionPopover();
+      } catch (err) { toast('Failed to resize cue.', 'error'); }
+    });
+    btn.parentNode.replaceChild(fresh, btn);
+  });
+  // Wire Set button for custom value
+  const setBtn = document.getElementById('ze-cue-action-set-size');
+  if (setBtn) {
+    const freshBtn = setBtn.cloneNode(true);
+    freshBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const newSize = parseInt(sizeInput?.value, 10);
+      if (!newSize || newSize < 25 || newSize > 999) { toast('Size must be 25\u2013999.', 'error'); return; }
+      const pid = state.activeProduction?.id;
+      if (!pid || !isOwner()) { toast('Only the owner can resize cues.', 'error'); return; }
+      try {
+        await updateDoc(doc(db, 'productions', pid, 'scriptCues', cue.id), { size: newSize });
+        toast('Cue size set to ' + newSize, 'success');
+        zeCloseCueActionPopover();
+      } catch (err) { toast('Failed to resize cue.', 'error'); }
+    });
+    setBtn.parentNode.replaceChild(freshBtn, setBtn);
+  }
 
   // Toggle remove-connector visibility
   const removeBtn = document.getElementById('ze-cue-action-remove');
@@ -1419,6 +1473,8 @@ async function zeSavePlacedCue() {
   const label = sanitizeName(document.getElementById('ze-cue-label')?.value || '');
   if (!label) { toast('Label is required.', 'error'); return; }
   const description = sanitizeName(document.getElementById('ze-cue-desc')?.value || '');
+  const _szPre = document.getElementById('ze-cue-size-preset');
+  const size = _szPre?.value === 'custom' ? (parseInt(document.getElementById('ze-cue-size-custom')?.value, 10) || 100) : (parseInt(_szPre?.value, 10) || 200);
   const page = parseInt(pdfPageToScriptLabel(currentPage, currentHalf), 10);
   if (isNaN(page) || page < 1) { toast('Cannot place cue on a pre-script page.', 'error'); zeCloseCuePopover(); return; }
   const bounds = {
@@ -1433,6 +1489,7 @@ async function zeSavePlacedCue() {
     type,
     label,
     description,
+    size,
     xSide: zeCuePending.xPct < 50 ? 'left' : 'right',
     yPosition: zeCuePending.yPct,
     zoneIdx: null,
@@ -1467,6 +1524,13 @@ function zeRenderCueMarkers() {
   const pageCues = scriptCues.filter(c => c.page === scriptPageNum);
   if (pageCues.length === 0) return;
 
+  // Distribute default Y positions for cues without explicit yPosition
+  const needsY = pageCues.filter(c => c.yPosition == null && c.bounds?.y == null);
+  if (needsY.length > 0) {
+    const step = 80 / (needsY.length + 1);
+    needsY.forEach((c, i) => { c._computedY = step * (i + 1); });
+  }
+
   // SVG overlay for connector lines (percentage-based viewBox)
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.classList.add('ze-cue-connector-svg');
@@ -1476,16 +1540,22 @@ function zeRenderCueMarkers() {
 
   pageCues.forEach(cue => {
     const colors = ZE_CUE_COLORS[cue.type] || ZE_CUE_COLORS.OTHER;
-    const yPct = cue.bounds?.y ?? cue.yPosition ?? 10;
+    const yPct = cue.yPosition != null ? cue.yPosition : (cue.bounds?.y ?? cue._computedY ?? 10);
+    const side = cue.xSide || 'left';
+    // Numeric size — backward compat for old string values
+    const _rawSize = cue.size;
+    const sizeNum = typeof _rawSize === 'number' ? _rawSize : ({ sm: 75, md: 100, lg: 130 }[_rawSize] || 100);
+    const scale = sizeNum / 100;
 
     // --- Connector line (if anchor exists) ---
     if (cue.anchorX != null && cue.anchorY != null) {
+      const edgeX = side === 'left' ? 0 : 100;
       const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
       line.classList.add('ze-connector-line');
       line.dataset.cueId = cue.id;
       line.setAttribute('x1', cue.anchorX);
       line.setAttribute('y1', cue.anchorY);
-      line.setAttribute('x2', 0);
+      line.setAttribute('x2', edgeX);
       line.setAttribute('y2', yPct);
       line.setAttribute('stroke', colors.fg);
       line.setAttribute('stroke-width', '0.4');
@@ -1506,15 +1576,25 @@ function zeRenderCueMarkers() {
       svg.appendChild(dot);
     }
 
-    // --- Cue marker pill ---
+    // --- Cue marker pill (matches Run Show style, numeric sizing) ---
+    const _w = Math.round(46 * scale);
+    const _h = Math.round(18 * scale);
+    const _fs = Math.max(7, Math.round(10 * scale));
+    const _off = _w + 6;   // offset into margin = pill width + small gap
     const marker = document.createElement('div');
     marker.className = 'ze-cue-marker';
     marker.dataset.cueId = cue.id;
-    marker.style.top = yPct + '%';
-    marker.style.background = colors.bg;
-    marker.style.color = colors.fg;
-    marker.style.borderColor = colors.border;
-    marker.innerHTML = '<span class="ze-cue-type-tag">' + escapeHtml(cue.type) + '</span> ' + escapeHtml(cue.label || '');
+    marker.style.cssText = [
+      'top:' + yPct + '%',
+      side === 'right' ? 'right:-' + _off + 'px' : 'left:-' + _off + 'px',
+      'width:' + _w + 'px',
+      'height:' + _h + 'px',
+      'border-radius:' + Math.round(_h / 2) + 'px',
+      'font-size:' + _fs + 'px',
+      'background:' + colors.bg,
+      'color:' + colors.fg,
+    ].join(';');
+    marker.textContent = cue.label || cue.type;
     marker.title = (cue.type || '') + ' ' + (cue.label || '') + (cue.description ? ' — ' + cue.description : '');
     marker.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -1563,8 +1643,12 @@ function renderCuesPanel() {
   const cueRows = scriptCues.map(c => {
     return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #2e2c29;"><span style="font-family:\'DM Mono\',monospace;font-size:11px;color:#5c5850;min-width:40px;">p.' + c.page + '</span><span class="cue-type-badge cue-type-badge--' + escapeHtml(c.type) + '">' + escapeHtml(c.type) + '</span><span style="flex:1;font-size:13px;color:#e8e4dc;">' + escapeHtml(c.label || '') + '</span>' + (owner ? '<button class="panel-btn cue-edit-btn" data-id="' + escapeHtml(c.id) + '">Edit</button><button class="panel-btn panel-btn--danger cue-delete-btn" data-id="' + escapeHtml(c.id) + '">Delete</button>' : '') + '</div>';
   }).join('') || '<div style="color:#5c5850;font-size:13px;padding:12px 0;">No cues added yet.</div>';
-  panel.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;"><h3 style="font-family:\'Instrument Serif\',serif;font-size:20px;color:#c8a96e;">Script Cues</h3><div style="display:flex;gap:6px;">' + (owner ? '<button class="settings-btn" id="ln-cue-import-btn">Import JSON</button>' : '') + '<button class="settings-btn" id="ln-cue-export-btn">Export CSV</button></div></div><div id="ln-cue-list">' + cueRows + '</div>' + (owner ? '<div style="margin-top:24px;padding:20px;background:#1a1916;border:1px solid #2e2c29;border-radius:10px;"><h4 style="font-size:14px;color:#c8a96e;margin-bottom:12px;" id="cue-form-title">Add Cue</h4><div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;"><input class="form-input" id="cue-page-input" type="number" min="1" placeholder="Page" style="width:70px;" /><select class="form-select" id="cue-type-select">' + CUE_TYPES.map(t => '<option value="' + t + '">' + t + '</option>').join('') + '</select><input class="form-input" id="cue-label-input" type="text" maxlength="100" placeholder="Label (e.g. LX 42)" style="flex:1;min-width:150px;" /></div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;"><input class="form-input" id="cue-desc-input" type="text" maxlength="200" placeholder="Description (optional)" style="flex:1;min-width:200px;" /><label style="font-size:11px;color:#888;margin-left:4px;">Margin:</label><select class="form-select" id="cue-side-select" style="width:80px;" title="Which margin of the page to show this cue"><option value="left">Left</option><option value="right">Right</option></select><label style="font-size:11px;color:#888;margin-left:4px;">Position:</label><input class="form-input" id="cue-y-input" type="number" min="0" max="100" step="1" placeholder="Y%" style="width:55px;" title="Vertical position on page margin (0%=top, 100%=bottom). Leave empty for auto-placement." /></div><div style="display:flex;gap:8px;"><button class="modal-btn-primary" id="cue-save-btn">Add Cue</button><button class="modal-btn-cancel" id="cue-cancel-btn" style="display:none;">Cancel</button></div><input type="hidden" id="cue-edit-id" value="" /></div>' : '') + '<div style="margin-top:32px;"><h3 style="font-family:\'Instrument Serif\',serif;font-size:20px;color:#c8a96e;margin-bottom:12px;">Diagrams</h3>' + (owner ? '<button class="settings-btn settings-btn--primary" id="ln-diagrams-btn">Manage Diagrams</button>' : '') + '<div id="ln-diagrams-list" style="margin-top:12px;"></div></div>';
+  panel.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;"><h3 style="font-family:\'Instrument Serif\',serif;font-size:20px;color:#c8a96e;">Script Cues</h3><div style="display:flex;gap:6px;">' + (owner ? '<button class="settings-btn" id="ln-cue-import-btn">Import JSON</button>' : '') + '<button class="settings-btn" id="ln-cue-export-btn">Export CSV</button></div></div><div id="ln-cue-list">' + cueRows + '</div>' + (owner ? '<div style="margin-top:24px;padding:20px;background:#1a1916;border:1px solid #2e2c29;border-radius:10px;"><h4 style="font-size:14px;color:#c8a96e;margin-bottom:12px;" id="cue-form-title">Add Cue</h4><div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;"><input class="form-input" id="cue-page-input" type="number" min="1" placeholder="Page" style="width:70px;" /><select class="form-select" id="cue-type-select">' + CUE_TYPES.map(t => '<option value="' + t + '">' + t + '</option>').join('') + '</select><input class="form-input" id="cue-label-input" type="text" maxlength="100" placeholder="Label (e.g. LX 42)" style="flex:1;min-width:150px;" /></div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;"><input class="form-input" id="cue-desc-input" type="text" maxlength="200" placeholder="Description (optional)" style="flex:1;min-width:200px;" /><label style="font-size:11px;color:#888;margin-left:4px;">Margin:</label><select class="form-select" id="cue-side-select" style="width:80px;" title="Which margin of the page to show this cue"><option value="left">Left</option><option value="right">Right</option></select><label style="font-size:11px;color:#888;margin-left:4px;">Position:</label><input class="form-input" id="cue-y-input" type="number" min="0" max="100" step="1" placeholder="Y%" style="width:55px;" title="Vertical position on page margin (0%=top, 100%=bottom). Leave empty for auto-placement." /></div><div style="margin-bottom:8px;"><label style="font-size:11px;color:#9a9488;display:block;margin-bottom:2px;">Size</label><select id="cue-size-preset" class="form-select" style="width:100%;padding:5px 8px;background:#1e1d1b;border:1px solid #3d3a36;color:#e8e4dc;border-radius:4px;font-size:12px;"><option value="125">S (125)</option><option value="200" selected>M (200)</option><option value="300">L (300)</option><option value="custom">Custom</option></select><div id="cue-size-custom-row" style="display:none;margin-top:4px;"><input id="cue-size-custom" type="number" min="25" max="999" step="1" value="100" style="width:100%;padding:5px 8px;background:#1e1d1b;border:1px solid #3d3a36;color:#e8e4dc;border-radius:4px;font-size:12px;font-family:monospace;box-sizing:border-box;" placeholder="Enter size"></div></div><div style="display:flex;gap:8px;"><button class="modal-btn-primary" id="cue-save-btn">Add Cue</button><button class="modal-btn-cancel" id="cue-cancel-btn" style="display:none;">Cancel</button></div><input type="hidden" id="cue-edit-id" value="" /></div>' : '') + '<div style="margin-top:32px;"><h3 style="font-family:\'Instrument Serif\',serif;font-size:20px;color:#c8a96e;margin-bottom:12px;">Diagrams</h3>' + (owner ? '<button class="settings-btn settings-btn--primary" id="ln-diagrams-btn">Manage Diagrams</button>' : '') + '<div id="ln-diagrams-list" style="margin-top:12px;"></div></div>';
   if (owner) {
+    panel.querySelector('#cue-size-preset')?.addEventListener('change', function() {
+      const row = document.getElementById('cue-size-custom-row');
+      if (row) row.style.display = this.value === 'custom' ? 'block' : 'none';
+    });
     panel.querySelector('#cue-save-btn')?.addEventListener('click', saveCue);
     panel.querySelector('#cue-cancel-btn')?.addEventListener('click', cancelCueEdit);
     panel.querySelectorAll('.cue-edit-btn').forEach(btn => btn.addEventListener('click', () => startCueEdit(btn.dataset.id)));
@@ -1588,7 +1672,9 @@ async function saveCue() {
   const xSide = document.getElementById('cue-side-select')?.value || 'left';
   const yPositionRaw = document.getElementById('cue-y-input')?.value;
   const yPosition = yPositionRaw ? parseFloat(yPositionRaw) : null;
-  const cueData = { page, half: '', type, label, description, xSide, yPosition, zoneIdx: null, bounds: null, createdAt: serverTimestamp() };
+  const _szSel = document.getElementById('cue-size-preset')?.value;
+  const size = _szSel === 'custom' ? (parseInt(document.getElementById('cue-size-custom')?.value, 10) || 100) : (parseInt(_szSel, 10) || 200);
+  const cueData = { page, half: '', type, label, description, xSide, yPosition, size, zoneIdx: null, bounds: null, createdAt: serverTimestamp() };
   try {
     if (editId) { await updateDoc(doc(db, 'productions', pid, 'scriptCues', editId), cueData); toast('Cue updated.', 'success'); }
     else { await addDoc(collection(db, 'productions', pid, 'scriptCues'), cueData); toast('Cue added!', 'success'); }
@@ -1613,6 +1699,21 @@ function startCueEdit(cueId) {
   if (sideEl) sideEl.value = cue.xSide || 'left';
   const yEl = document.getElementById('cue-y-input');
   if (yEl) yEl.value = cue.yPosition != null ? cue.yPosition : '';
+  const _szPresetEl = document.getElementById('cue-size-preset');
+  const _szCustomEl = document.getElementById('cue-size-custom');
+  const _szCustomRow = document.getElementById('cue-size-custom-row');
+  if (_szPresetEl) {
+    const _rs = cue.size;
+    const _num = typeof _rs === 'number' ? _rs : ({ sm: 75, md: 100, lg: 130 }[_rs] || 100);
+    if ([125, 200, 300].includes(_num)) {
+      _szPresetEl.value = String(_num);
+      if (_szCustomRow) _szCustomRow.style.display = 'none';
+    } else {
+      _szPresetEl.value = 'custom';
+      if (_szCustomEl) _szCustomEl.value = _num;
+      if (_szCustomRow) _szCustomRow.style.display = 'block';
+    }
+  }
   document.getElementById('cue-form-title').textContent = 'Edit Cue';
   document.getElementById('cue-save-btn').textContent = 'Update Cue';
   document.getElementById('cue-cancel-btn').style.display = '';
@@ -1627,6 +1728,12 @@ function cancelCueEdit() {
   if (sideEl) sideEl.value = 'left';
   const yEl = document.getElementById('cue-y-input');
   if (yEl) yEl.value = '';
+  const _szPre = document.getElementById('cue-size-preset');
+  if (_szPre) _szPre.value = '200';
+  const _szCRow = document.getElementById('cue-size-custom-row');
+  if (_szCRow) _szCRow.style.display = 'none';
+  const _szCust = document.getElementById('cue-size-custom');
+  if (_szCust) _szCust.value = '100';
   document.getElementById('cue-form-title').textContent = 'Add Cue';
   document.getElementById('cue-save-btn').textContent = 'Add Cue';
   document.getElementById('cue-cancel-btn').style.display = 'none';

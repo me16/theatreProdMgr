@@ -1339,20 +1339,19 @@
       width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
     }
 
-    /* ===== CUE PLACEMENT MARKERS (Zone Editor) ===== */
+    /* ===== CUE PLACEMENT MARKERS (Zone Editor — matches Run Show pills) ===== */
+    /* Dimensions (width, height, font-size, left/right offset) are set inline via JS
+       based on the numeric cue.size field (default 100). */
     .ze-cue-marker {
-      position: absolute; left: 0; height: 18px; display: flex; align-items: center;
-      padding: 0 8px 0 4px; border-radius: 0 9px 9px 0; cursor: pointer;
-      font-family: 'DM Mono', monospace; font-size: 9px; font-weight: 600;
+      position: absolute; display: flex; align-items: center; justify-content: center;
+      cursor: pointer;
+      font-family: 'DM Mono', monospace; font-weight: 500;
       white-space: nowrap; z-index: 15; pointer-events: all;
-      transition: opacity 0.15s, transform 0.15s; transform-origin: left center;
-      border: 1px solid; border-left: 3px solid;
+      transition: transform 0.15s, box-shadow 0.15s;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
     }
-    .ze-cue-marker:hover { transform: scale(1.05); z-index: 20; }
-    .ze-cue-marker .ze-cue-type-tag {
-      font-size: 8px; opacity: 0.7; margin-right: 4px;
-    }
-    .ze-cue-marker--selected { outline: 2px solid var(--gold); outline-offset: 1px; }
+    .ze-cue-marker:hover { transform: scale(1.08); box-shadow: 0 4px 12px rgba(0,0,0,0.4); z-index: 20; }
+    .ze-cue-marker--selected { outline: 2px solid var(--gold); outline-offset: 1px; z-index: 21; }
 
     /* ===== CUE CONNECTOR LINES (SVG in zone editor) ===== */
     .ze-cue-connector-svg {
@@ -1653,6 +1652,18 @@
                 <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:3px;">Description (optional)</label>
                 <input id="ze-cue-desc" type="text" maxlength="250" placeholder="" class="ze-input" style="width:100%;box-sizing:border-box;">
               </div>
+              <div style="margin-bottom:10px;">
+                <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:3px;">Size</label>
+                <select id="ze-cue-size-preset" class="form-select" style="width:100%;padding:5px 8px;background:var(--bg-raised);border:1px solid var(--bg-border);color:var(--text-primary);border-radius:4px;font-size:12px;" onchange="document.getElementById('ze-cue-size-custom-row').style.display=this.value==='custom'?'block':'none'">
+                  <option value="125">S (125)</option>
+                  <option value="200" selected>M (200)</option>
+                  <option value="300">L (300)</option>
+                  <option value="custom">Custom</option>
+                </select>
+                <div id="ze-cue-size-custom-row" style="display:none;margin-top:4px;">
+                  <input id="ze-cue-size-custom" type="number" min="25" max="999" step="1" value="100" class="ze-input" style="width:100%;box-sizing:border-box;" placeholder="Enter size">
+                </div>
+              </div>
               <div style="display:flex;gap:6px;justify-content:flex-end;">
                 <button id="ze-cue-cancel" class="ze-tool-btn" style="padding:5px 12px;">Cancel</button>
                 <button id="ze-cue-save" class="ze-tool-btn ze-accent" style="padding:5px 12px;">Add Cue</button>
@@ -1661,6 +1672,17 @@
             <!-- Cue action popover (click existing marker) -->
             <div id="ze-cue-action-popover" style="display:none;position:absolute;z-index:55;background:var(--bg-card);border:1px solid var(--bg-border);border-radius:8px;box-shadow:0 8px 32px rgba(0,0,0,0.5);padding:10px;width:180px;">
               <div id="ze-cue-action-title" style="font-family:'DM Mono',monospace;font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></div>
+              <div style="margin-bottom:4px;">
+                <div style="display:flex;gap:3px;margin-bottom:3px;">
+                  <button type="button" class="ze-tool-btn ze-cue-action-preset" data-val="125" style="flex:1;padding:3px 0;font-size:10px;">S</button>
+                  <button type="button" class="ze-tool-btn ze-cue-action-preset" data-val="200" style="flex:1;padding:3px 0;font-size:10px;">M</button>
+                  <button type="button" class="ze-tool-btn ze-cue-action-preset" data-val="300" style="flex:1;padding:3px 0;font-size:10px;">L</button>
+                </div>
+                <div style="display:flex;gap:3px;align-items:center;">
+                  <input id="ze-cue-action-size" type="number" min="25" max="999" step="1" value="100" class="ze-input" style="flex:1;text-align:center;padding:3px 4px;font-size:11px;" placeholder="Custom">
+                  <button id="ze-cue-action-set-size" class="ze-tool-btn ze-accent" style="padding:3px 8px;font-size:10px;">Set</button>
+                </div>
+              </div>
               <button id="ze-cue-action-draw" class="ze-tool-btn" style="width:100%;padding:5px 8px;margin-bottom:4px;font-size:11px;">Draw Connector</button>
               <button id="ze-cue-action-remove" class="ze-tool-btn" style="width:100%;padding:5px 8px;margin-bottom:4px;font-size:11px;display:none;">Remove Connector</button>
               <button id="ze-cue-action-delete" class="ze-tool-btn" style="width:100%;padding:5px 8px;font-size:11px;color:#e63946;">Delete Cue</button>

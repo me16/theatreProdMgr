@@ -38,6 +38,7 @@ let currentPage = 1;
 let currentHalf = 'L';
 let zoneSaveTimeout = null;
 let lnInitialized = false;
+let lnBookmarks = [];
 
 // Feature 5: Script cues state
 let scriptCues = [];
@@ -199,6 +200,9 @@ export function initLineNotes() {
   // Wire zone editor toolbar
   setTimeout(() => wireZeToolbar(), 0);
 
+  // Bookmark button
+  document.getElementById('ln-bookmark-btn')?.addEventListener('click', lnToggleBookmark);
+
   // Cue placement mode: button + popover wiring
   document.getElementById('ln-place-cue-btn')?.addEventListener('click', zeToggleCueMode);
   document.getElementById('ze-cue-save')?.addEventListener('click', zeSavePlacedCue);
@@ -234,6 +238,8 @@ export async function onLineNotesTabActivated() {
   }
   // The Line Notes tab now opens directly to the zones view
   switchToZonesView();
+  lnLoadBookmarks();
+  lnUpdateBookmarkBtn();
 }
 
 /** Fetch scriptPageStart fields from Firestore and apply them locally. */
@@ -621,6 +627,7 @@ async function renderZoneEditorPage(num) {
   zeRenderZones();
   zeRenderCueMarkers();
   zeUpdateListPanel();
+  lnUpdateBookmarkBtn();
 }
 
 function zeCurrentZones() {
@@ -1100,6 +1107,46 @@ function wireZeToolbar() {
   }
 }
 
+/* ═══════════════════════════════════════════════════════════
+   BOOKMARKS
+   ═══════════════════════════════════════════════════════════ */
+function lnLoadBookmarks() {
+  lnBookmarks = (state.activeProduction?.scriptBookmarks || []).slice();
+}
+
+function lnIsCurrentPageBookmarked() {
+  const half = splitMode ? currentHalf : 'L';
+  return lnBookmarks.some(b => b.page === currentPage && b.half === half);
+}
+
+function lnUpdateBookmarkBtn() {
+  const btn = document.getElementById('ln-bookmark-btn');
+  if (!btn) return;
+  const marked = lnIsCurrentPageBookmarked();
+  btn.textContent = marked ? '★' : '☆';
+  btn.title = marked ? 'Remove bookmark from this page' : 'Bookmark this page';
+  btn.classList.toggle('ln-header-btn--active', marked);
+}
+
+async function lnToggleBookmark() {
+  if (!pdfDoc) return;
+  const half = splitMode ? currentHalf : 'L';
+  const idx = lnBookmarks.findIndex(b => b.page === currentPage && b.half === half);
+  if (idx >= 0) {
+    lnBookmarks.splice(idx, 1);
+  } else {
+    lnBookmarks.push({ id: genId(), page: currentPage, half, createdAt: Date.now() });
+  }
+  lnUpdateBookmarkBtn();
+  if (!state.activeProduction?.id) return;
+  state.activeProduction.scriptBookmarks = lnBookmarks.slice();
+  try {
+    await updateDoc(doc(db, 'productions', state.activeProduction.id), {
+      scriptBookmarks: lnBookmarks,
+    });
+  } catch(e) { console.warn('Could not save bookmarks:', e); }
+}
+
 async function changeZonePage(delta) {
   if (!pdfDoc) return;
   if (splitMode) {
@@ -1221,6 +1268,7 @@ const ZE_CUE_COLORS = {
   PX:    { bg: '#1A2A1A', fg: '#2D8A4E', border: '#2D8A4E' },
   FLY:   { bg: '#2E2C29', fg: '#9A9488', border: '#9A9488' },
   CARP:  { bg: '#2E2C29', fg: '#9A9488', border: '#9A9488' },
+  BLOCK: { bg: '#3a2800', fg: '#f5a623', border: '#f5a623' },
   OTHER: { bg: '#2E2C29', fg: '#9A9488', border: '#9A9488' },
 };
 
@@ -1366,8 +1414,8 @@ function renderCuesPanel() {
   const panel = document.getElementById('ln-cues-panel');
   if (!panel) return;
   const owner = isOwner();
-  const CUE_TYPES = ['LX', 'SQ', 'PX', 'FLY', 'CARP', 'OTHER'];
-  const CUE_COLORS = { LX: { bg: '#1A2E50', text: '#5B9BD4' }, SQ: { bg: '#2D1A14', text: '#E63946' }, PX: { bg: '#1A2A1A', text: '#2D8A4E' }, FLY: { bg: '#2E2C29', text: '#9A9488' }, CARP: { bg: '#2E2C29', text: '#9A9488' }, OTHER: { bg: '#2E2C29', text: '#9A9488' } };
+  const CUE_TYPES = ['LX', 'SQ', 'PX', 'FLY', 'CARP', 'BLOCK', 'OTHER'];
+  const CUE_COLORS = { LX: { bg: '#1A2E50', text: '#5B9BD4' }, SQ: { bg: '#2D1A14', text: '#E63946' }, PX: { bg: '#1A2A1A', text: '#2D8A4E' }, FLY: { bg: '#2E2C29', text: '#9A9488' }, CARP: { bg: '#2E2C29', text: '#9A9488' }, BLOCK: { bg: '#3a2800', text: '#f5a623' }, OTHER: { bg: '#2E2C29', text: '#9A9488' } };
   const cueRows = scriptCues.map(c => {
     return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #2e2c29;"><span style="font-family:\'DM Mono\',monospace;font-size:11px;color:#5c5850;min-width:40px;">p.' + c.page + '</span><span class="cue-type-badge cue-type-badge--' + escapeHtml(c.type) + '">' + escapeHtml(c.type) + '</span><span style="flex:1;font-size:13px;color:#e8e4dc;">' + escapeHtml(c.label || '') + '</span>' + (owner ? '<button class="panel-btn cue-edit-btn" data-id="' + escapeHtml(c.id) + '">Edit</button><button class="panel-btn panel-btn--danger cue-delete-btn" data-id="' + escapeHtml(c.id) + '">Delete</button>' : '') + '</div>';
   }).join('') || '<div style="color:#5c5850;font-size:13px;padding:12px 0;">No cues added yet.</div>';
@@ -1457,7 +1505,7 @@ function exportCuesCSV() {
 }
 function importCuesJSON() {
   if (!isOwner()) return;
-  const VALID_TYPES = ['LX', 'SQ', 'PX', 'FLY', 'CARP', 'OTHER'];
+  const VALID_TYPES = ['LX', 'SQ', 'PX', 'FLY', 'CARP', 'BLOCK', 'OTHER'];
   const input = document.createElement('input'); input.type = 'file'; input.accept = '.json';
   input.addEventListener('change', async () => {
     const file = input.files[0]; if (!file) return;

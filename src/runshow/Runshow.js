@@ -48,6 +48,7 @@ let rsLineZones = {};        // local cache { pageKey → zones[] }
 let rsNotes = [];
 let rsFlatChars = [];
 let rsActiveCharIdx = 0;
+let rsActiveCharIdxs = new Set([0]);
 let rsActiveNoteType = 'skp';
 let rsNotesUnsub = null;
 let rsRenderGen = 0;
@@ -82,6 +83,9 @@ let rsShowActorPills = false;         // toggle actor name pills on assigned zon
 
 // Timer-driven page tracking — last script page the timer navigated to
 let rsLastTimerScriptPage = 0;
+
+// Bookmarks (loaded from state.activeProduction.scriptBookmarks)
+let rsBookmarks = [];
 
 const NOTE_TYPES_MAP = {
   'skp': 'Skipped',
@@ -221,6 +225,12 @@ export function initRunShow() {
     if (e.target === document.getElementById('rs-hit-overlay')) rsClosePopover();
   });
 
+  // Focus the canvas area on click so the document-level keydown handler
+  // receives Arrow/bracket keys instead of the scroll container eating them.
+  document.getElementById('rs-canvas-area')?.addEventListener('click', () => {
+    document.getElementById('rs-canvas-area')?.focus({ preventScroll: true });
+  });
+
   // Popover buttons
   document.getElementById('rs-pop-cancel-btn')?.addEventListener('click', e => { e.stopPropagation(); rsClosePopover(); });
   document.getElementById('rs-pop-confirm-btn')?.addEventListener('click', e => { e.stopPropagation(); rsConfirmNote(); });
@@ -259,6 +269,14 @@ export function initRunShow() {
   document.getElementById('rs-prev-page')?.addEventListener('click', () => rsChangePage(-1));
   document.getElementById('rs-next-page')?.addEventListener('click', () => rsChangePage(1));
   document.getElementById('rs-split-btn')?.addEventListener('click', rsToggleSplitMode);
+
+  // Bookmarks dropdown
+  document.getElementById('rs-bookmarks-btn')?.addEventListener('click', e => {
+    e.stopPropagation();
+    const menu = document.getElementById('rs-bookmarks-menu');
+    if (menu?.style.display !== 'none') { rsHideBookmarksMenu(); } else { rsShowBookmarksMenu(); }
+  });
+  document.addEventListener('click', () => rsHideBookmarksMenu());
   document.getElementById('rs-send-btn')?.addEventListener('click', rsOpenSendNotes);
 
   // Feature 7: Email Notes button
@@ -383,6 +401,9 @@ export async function onRunShowTabActivated() {
     rsLoadScript();
   }
   renderRunShowTab();
+  rsLoadBookmarks();
+  rsUpdateBookmarksBtn();
+  document.getElementById('rs-canvas-area')?.focus({ preventScroll: true });
 }
 
 /** Fetch scriptPageStart fields from Firestore and sync onto state.activeProduction. */
@@ -744,7 +765,7 @@ function rsSubscribeToNotes() {
   const pid = state.activeProduction.id;
   // Feature 3: filter notes by session ID (client-side to avoid index)
   const sessionId = state.runSession?.sessionId || rsLastSessionId;
-  const applyFilter = (allNotes) => sessionId ? allNotes.filter(n => n.sessionId === sessionId) : allNotes;
+  const applyFilter = (allNotes) => sessionId ? allNotes.filter(n => n.sessionId === sessionId) : [];
   try {
     rsNotesUnsub = onSnapshot(
       collection(db, 'productions', pid, 'lineNotes'),
@@ -1379,10 +1400,7 @@ function rsRenderLineZones(zKey) {
       if (existing) rsOpenEditPopover(e, existing);
       else rsOpenPopover(e, rsCurrentPage, rsCurrentHalf, idx, zone);
     });
-    const label = document.createElement('span');
-    label.className = 'zone-label';
-    label.textContent = zone.text ? zone.text.substring(0, 40) : `zone ${idx}`;
-    div.appendChild(label);
+
     // Actor pill(s) (when toggled on — supports multiple actors)
     if (rsShowActorPills) {
       const _rsActors = zone.assignedActors && zone.assignedActors.length > 0
@@ -1442,12 +1460,22 @@ function rsRedrawOverlay(num) {
    ═══════════════════════════════════════════════════════════ */
 function rsOpenPopover(e, pageNum, half, zoneIdx, zone) {
   e.stopPropagation();
+  if (!state.runSession) { toast('Start a run to take line notes'); return; }
   if (rsFlatChars.length === 0) { toast('Add cast members first — go to Cast & Crew tab'); return; }
-  // Feature 1: For NEW notes, route through FAB quick-note popover instead
+  // Default to the character assigned to this zone
+  const zoneActors = zone.assignedActors && zone.assignedActors.length > 0
+    ? zone.assignedActors
+    : (zone.assignedCastId && zone.assignedCharName ? [{ castId: zone.assignedCastId, charName: zone.assignedCharName }] : []);
+  const preselectedActorIdxs = zoneActors
+    .map(a => rsFlatChars.findIndex(c => c.castId === a.castId && c.name === (a.charName || a.characterName)))
+    .filter(i => i >= 0);
+  if (preselectedActorIdxs.length > 0) rsActiveCharIdx = preselectedActorIdxs[0];
+  // For NEW notes, route through FAB quick-note popover
   rsPendingNote = {
     page: pageNum, half: rsSplitMode ? half : '', zoneIdx,
     bounds: { x: zone.x, y: zone.y, w: zone.w, h: Math.max(zone.h, 1.5) },
-    lineText: zone.text || ''
+    lineText: zone.text || '',
+    preselectedActorIdxs: preselectedActorIdxs.length > 0 ? preselectedActorIdxs : null,
   };
   openFabPopover();
   // Show the zone's script text as a read-only preview
@@ -1471,6 +1499,11 @@ function rsOpenPopover(e, pageNum, half, zoneIdx, zone) {
 function rsOpenEditPopover(e, note) {
   e.stopPropagation();
   rsPendingNote = { editId: note.id, page: note.page, half: note.half || '', bounds: note.bounds, lineText: note.lineText || '' };
+  const noteActors = note.actors?.length > 0
+    ? note.actors
+    : (note.castId ? [{ castId: note.castId, characterName: note.characterName || note.charName }] : []);
+  const noteActorIdxs = noteActors.map(a => rsFlatChars.findIndex(c => c.castId === a.castId && c.name === (a.characterName || a.charName))).filter(i => i >= 0);
+  rsActiveCharIdxs = new Set(noteActorIdxs.length > 0 ? noteActorIdxs : [rsActiveCharIdx]);
   const fc = rsFlatChars.find(c => c.castId === note.castId && c.name === (note.characterName || note.charName));
   rsBuildPopover(fc?.id || note.charId || null, note.type, note.lineText);
   // Feature 2: Pre-fill the note body textarea
@@ -1498,9 +1531,10 @@ function rsBuildPopover(selCharId, selType, lineText) {
   if (castLabel) castLabel.textContent = rsFlatChars.length === 1 ? rsFlatChars[0].name : 'Cast';
 
   const defChar = selCharId || (rsFlatChars[rsActiveCharIdx]?.id) || rsFlatChars[0]?.id;
+  if (defChar) { const ci = rsFlatChars.findIndex(c => c.id === defChar); if (ci >= 0) { rsActiveCharIdx = ci; if (!rsActiveCharIdxs.size) rsActiveCharIdxs = new Set([ci]); } }
   rsFlatChars.forEach((c, i) => {
     const div = document.createElement('div');
-    div.className = 'popover-char' + (c.id === defChar ? ' popover-char--active' : '');
+    div.className = 'popover-char' + (rsActiveCharIdxs.has(i) ? ' popover-char--active' : '');
     div.dataset.id = c.id;
     div.innerHTML = `<div class="pop-char-dot" style="background:${c.color};width:9px;height:9px;border-radius:50%;flex-shrink:0;"></div>
       <div style="flex:1">
@@ -1509,13 +1543,16 @@ function rsBuildPopover(selCharId, selType, lineText) {
       </div>
       <span class="shortcut-key">${i + 1}</span>`;
     div.addEventListener('click', () => {
-      charsDiv?.querySelectorAll('.popover-char').forEach(el => el.classList.remove('popover-char--active'));
-      div.classList.add('popover-char--active');
-      rsActiveCharIdx = i;
+      if (rsActiveCharIdxs.has(i)) {
+        if (rsActiveCharIdxs.size > 1) rsActiveCharIdxs.delete(i);
+      } else {
+        rsActiveCharIdxs.add(i);
+      }
+      charsDiv?.querySelectorAll('.popover-char').forEach((el, j) => el.classList.toggle('popover-char--active', rsActiveCharIdxs.has(j)));
+      rsActiveCharIdx = Array.from(rsActiveCharIdxs)[0];
     });
     charsDiv?.appendChild(div);
   });
-  if (defChar) { const ci = rsFlatChars.findIndex(c => c.id === defChar); if (ci >= 0) rsActiveCharIdx = ci; }
 
   const defType = selType || rsActiveNoteType;
   const TYPE_KEYS = { skp: 'S', para: 'P', line: 'L', add: 'A', gen: 'G' };
@@ -1574,8 +1611,10 @@ function rsClosePopover() {
 }
 
 async function rsConfirmNote() {
-  if (!rsPendingNote || rsActiveCharIdx < 0 || !rsFlatChars[rsActiveCharIdx]) return;
-  const fc = rsFlatChars[rsActiveCharIdx];
+  if (!rsPendingNote) return;
+  const selectedFcs = Array.from(rsActiveCharIdxs).map(i => rsFlatChars[i]).filter(Boolean);
+  if (selectedFcs.length === 0) return;
+  const fc = selectedFcs[0];
   const pid = state.activeProduction.id;
   // Feature 2: Read the optional note text from the zone popover textarea
   const noteTextEl = document.getElementById('rs-pop-note-text');
@@ -1585,6 +1624,7 @@ async function rsConfirmNote() {
     castId: fc.castId,
     characterName: fc.name,
     charColor: fc.color,
+    actors: selectedFcs.map(f => ({ castId: f.castId, characterName: f.name, charColor: f.color })),
     type: rsActiveNoteType,
     page: rsPendingNote.page,
     half: rsPendingNote.half || '',
@@ -1666,6 +1706,49 @@ function rsGlobalMouseUp(e) {
 }
 
 /* ═══════════════════════════════════════════════════════════
+   BOOKMARKS
+   ═══════════════════════════════════════════════════════════ */
+function rsLoadBookmarks() {
+  rsBookmarks = (state.activeProduction?.scriptBookmarks || []).slice();
+}
+
+function rsUpdateBookmarksBtn() {
+  const btn = document.getElementById('rs-bookmarks-btn');
+  if (btn) btn.style.display = rsBookmarks.length > 0 ? '' : 'none';
+}
+
+function rsShowBookmarksMenu() {
+  const menu = document.getElementById('rs-bookmarks-menu');
+  if (!menu || !rsBookmarks.length) return;
+  menu.innerHTML = rsBookmarks
+    .slice()
+    .sort((a, b) => a.page - b.page || (a.half > b.half ? 1 : -1))
+    .map(b => {
+      const label = rsScriptLabel(b.page, b.half || 'L');
+      return `<button class="rs-bookmark-item" data-page="${b.page}" data-half="${escapeHtml(b.half || 'L')}" style="display:block;width:100%;text-align:left;padding:8px 14px;background:none;border:none;color:var(--text-primary);font-family:'DM Mono',monospace;font-size:12px;cursor:pointer;border-bottom:1px solid var(--bg-border);">p.&nbsp;${escapeHtml(label)}</button>`;
+    }).join('');
+  menu.style.display = 'block';
+  menu.querySelectorAll('.rs-bookmark-item').forEach(item => {
+    item.addEventListener('mouseenter', () => { item.style.background = 'var(--bg-raised)'; });
+    item.addEventListener('mouseleave', () => { item.style.background = 'none'; });
+    item.addEventListener('click', e => {
+      e.stopPropagation();
+      rsHideBookmarksMenu();
+      rsCurrentPage = parseInt(item.dataset.page);
+      rsCurrentHalf = item.dataset.half || 'L';
+      const pageInput = document.getElementById('rs-page-input');
+      if (pageInput) pageInput.value = rsScriptLabel(rsCurrentPage, rsCurrentHalf);
+      rsRenderPage(rsCurrentPage);
+    });
+  });
+}
+
+function rsHideBookmarksMenu() {
+  const menu = document.getElementById('rs-bookmarks-menu');
+  if (menu) menu.style.display = 'none';
+}
+
+/* ═══════════════════════════════════════════════════════════
    PAGE NAVIGATION
    ═══════════════════════════════════════════════════════════ */
 async function rsChangePage(delta) {
@@ -1700,19 +1783,41 @@ function rsToggleSplitMode() {
 /* ═══════════════════════════════════════════════════════════
    KEYBOARD SHORTCUTS
    ═══════════════════════════════════════════════════════════ */
-function rsHandleKeydown(e) {
+
+/**
+ * Returns true when any modal overlay is visibly open.
+ * NOTE: run-report-modal has class "modal-backdrop" but lives in the DOM
+ * permanently (display:none), so we must never use querySelector('.modal-backdrop')
+ * without a visibility check — that would always match and block all keyboard nav.
+ */
+function rsIsAnyModalOpen() {
+  const reportModal = document.getElementById('run-report-modal');
+  if (reportModal && reportModal.style.display !== 'none') return true;
+  return !!document.querySelector(
+    '.cast-modal.open, .send-notes-modal.open, .char-modal.open, ' +
+    '.prop-notes-modal, .prop-photo-lightbox'
+  );
+}
+
+async function rsHandleKeydown(e) {
   if (!document.getElementById('tab-runshow')?.classList.contains('tab-panel--active')) return;
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-    // Fix 11 [UX-004]: Block keyboard nav when modals are open
-    if (document.querySelector('.modal-backdrop, .cast-modal.open, [class*="modal"].open, .prop-notes-modal, .prop-photo-lightbox')) return;
+  if (rsIsAnyModalOpen()) return;
 
   if (rsPopoverOpen) {
     if (e.key === 'Enter') { rsConfirmNote(); return; }
     if (e.key === 'Escape') { rsClosePopover(); return; }
     const num = parseInt(e.key);
     if (num >= 1 && num <= rsFlatChars.length) {
-      document.getElementById('rs-pop-chars')?.querySelectorAll('.popover-char').forEach((el, i) => el.classList.toggle('popover-char--active', i === num - 1));
-      rsActiveCharIdx = num - 1; return;
+      const idx = num - 1;
+      if (rsActiveCharIdxs.has(idx)) {
+        if (rsActiveCharIdxs.size > 1) rsActiveCharIdxs.delete(idx);
+      } else {
+        rsActiveCharIdxs.add(idx);
+      }
+      rsActiveCharIdx = Array.from(rsActiveCharIdxs)[0];
+      document.getElementById('rs-pop-chars')?.querySelectorAll('.popover-char').forEach((el, i) => el.classList.toggle('popover-char--active', rsActiveCharIdxs.has(i)));
+      return;
     }
     const typeKeys = { 's': 'skp', 'p': 'para', 'l': 'line', 'a': 'add', 'g': 'gen' };
     if (typeKeys[e.key.toLowerCase()]) {
@@ -1722,8 +1827,8 @@ function rsHandleKeydown(e) {
     }
   }
 
-  if (e.key === 'ArrowRight' || e.key === ']') rsChangePage(1);
-  if (e.key === 'ArrowLeft' || e.key === '[') rsChangePage(-1);
+  // ArrowLeft/Right page navigation is handled by the dedicated capture-phase
+  // module-level handler below. Do not handle it here.
   if (e.key === 'Escape') { rsClosePopover(); rsNotesHoveredZoneIdx = null; }
 
   if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
@@ -1777,13 +1882,18 @@ function rsActivateFocusedZone() {
 /* ═══════════════════════════════════════════════════════════
    QUICK-ENTRY FAB POPOVER
    ═══════════════════════════════════════════════════════════ */
-let fabSelectedCharIdx = 0;
+let fabSelectedCharIdxs = new Set([0]);
 let fabSelectedType = 'skp';
 
 function openFabPopover() {
   // Feature 1: Allow opening even without active run session if from zone
   if (!state.runSession && !rsPendingNote) return;
-  fabSelectedCharIdx = rsActiveCharIdx;
+  // Pre-select all zone actors if available, else fall back to last active char
+  if (rsPendingNote?.preselectedActorIdxs?.length > 0) {
+    fabSelectedCharIdxs = new Set(rsPendingNote.preselectedActorIdxs);
+  } else {
+    fabSelectedCharIdxs = new Set([rsActiveCharIdx]);
+  }
   fabSelectedType = rsActiveNoteType;
 
   const pop = document.getElementById('run-note-popover');
@@ -1801,14 +1911,18 @@ function openFabPopover() {
   const charsEl = document.getElementById('rnp-chars');
   if (charsEl) {
     charsEl.innerHTML = rsFlatChars.map((c, i) => `
-      <div class="popover-char ${i === fabSelectedCharIdx ? 'popover-char--active' : ''}" data-idx="${i}" style="cursor:pointer;">
+      <div class="popover-char ${fabSelectedCharIdxs.has(i) ? 'popover-char--active' : ''}" data-idx="${i}" style="cursor:pointer;">
         <div class="pop-char-dot" style="background:${c.color};width:9px;height:9px;border-radius:50%;flex-shrink:0;"></div>
         <div style="flex:1"><div class="char-label">${escapeHtml(c.name)}</div></div>
         <span class="shortcut-key">${i + 1}</span>
       </div>`).join('');
     charsEl.querySelectorAll('.popover-char').forEach((el, i) => el.addEventListener('click', () => {
-      fabSelectedCharIdx = i;
-      charsEl.querySelectorAll('.popover-char').forEach((e2, j) => e2.classList.toggle('popover-char--active', j === i));
+      if (fabSelectedCharIdxs.has(i)) {
+        if (fabSelectedCharIdxs.size > 1) fabSelectedCharIdxs.delete(i);
+      } else {
+        fabSelectedCharIdxs.add(i);
+      }
+      charsEl.querySelectorAll('.popover-char').forEach((e2, j) => e2.classList.toggle('popover-char--active', fabSelectedCharIdxs.has(j)));
     }));
   }
 
@@ -1849,8 +1963,9 @@ function closeFabPopover() {
 
 async function confirmFabNote() {
   if (!state.runSession && !rsPendingNote) { closeFabPopover(); return; }
-  const fc = rsFlatChars[fabSelectedCharIdx];
-  if (!fc) { toast('Select a cast member', 'error'); return; }
+  const selectedFcs = Array.from(fabSelectedCharIdxs).map(i => rsFlatChars[i]).filter(Boolean);
+  if (selectedFcs.length === 0) { toast('Select a cast member', 'error'); return; }
+  const fc = selectedFcs[0];
   const textInput = document.getElementById('rnp-text');
   const freeText = textInput ? textInput.value.trim() : '';
   const pid = state.activeProduction.id;
@@ -1861,19 +1976,20 @@ async function confirmFabNote() {
     castId: fc.castId,
     characterName: fc.name,
     charColor: fc.color,
+    actors: selectedFcs.map(f => ({ castId: f.castId, characterName: f.name, charColor: f.color })),
     type: fabSelectedType,
     page: fromZone ? rsPendingNote.page : rsCurrentPage,
     half: fromZone ? (rsPendingNote.half || '') : '',
     zoneIdx: fromZone ? rsPendingNote.zoneIdx : null,
     bounds: fromZone ? rsPendingNote.bounds : null,
-    lineText: fromZone ? (rsPendingNote.lineText || '') : '', // Feature 2: zone text
-    noteBody: freeText,  // Feature 2: SM's typed note
+    lineText: fromZone ? (rsPendingNote.lineText || '') : '',
+    noteBody: freeText,
     productionId: pid,
     sessionId: state.runSession?.sessionId || null,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
-  rsActiveCharIdx = fabSelectedCharIdx;
+  rsActiveCharIdx = Array.from(fabSelectedCharIdxs)[0] ?? 0;
   rsActiveNoteType = fabSelectedType;
   toast('Note added');
   if (fromZone) rsPendingNote = null; // Feature 1
@@ -1894,6 +2010,29 @@ function _openMailto(uri) {
 /* ═══════════════════════════════════════════════════════════
    FEATURE 7: PER-ACTOR EMAIL NOTES (revised)
    ═══════════════════════════════════════════════════════════ */
+
+/**
+ * Expand a note into a byCastId grouping map, supporting multi-actor notes.
+ * Notes with an `actors` array appear in each actor's bucket.
+ */
+function _expandNoteIntoByCastId(n, byCastId, cast) {
+  const entries = n.actors?.length > 0
+    ? n.actors
+    : [{ castId: n.castId || n.charId, characterName: n.characterName || n.charName, charColor: n.charColor }];
+  entries.forEach(({ castId, characterName, charColor }) => {
+    if (!castId) return;
+    if (!byCastId[castId]) {
+      const member = cast.find(m => m.id === castId);
+      byCastId[castId] = {
+        actorName: member?.name || characterName || '?',
+        actorEmail: member?.email || '',
+        color: member?.color || charColor || '#888',
+        notes: [],
+      };
+    }
+    byCastId[castId].notes.push(n);
+  });
+}
 
 /** Build a formatted email body for one actor's line notes. */
 function _buildActorEmailBody(actorName, notes, show, dateStr) {
@@ -1961,19 +2100,7 @@ function rsOpenEmailNotes() {
   // ── Group notes by cast member ──
   const cast = getCastMembers();
   const byCastId = {};
-  rsNotes.forEach(n => {
-    const castId = n.castId || n.charId;
-    if (!byCastId[castId]) {
-      const member = cast.find(m => m.id === castId);
-      byCastId[castId] = {
-        actorName: member?.name || n.characterName || n.charName || '?',
-        actorEmail: member?.email || '',
-        color: member?.color || n.charColor || '#888',
-        notes: [],
-      };
-    }
-    byCastId[castId].notes.push(n);
-  });
+  rsNotes.forEach(n => _expandNoteIntoByCastId(n, byCastId, cast));
 
   const show = state.activeProduction?.title || '';
   const dateStr = new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
@@ -2064,6 +2191,32 @@ function rsOpenEmailNotes() {
   });
 }
 
+/* ═══════════════════════════════════════════════════════════
+   PAGE NAVIGATION — dedicated capture-phase keydown handler
+   ═══════════════════════════════════════════════════════════
+   This handler is the single source of truth for left/right page flipping.
+   It runs at module load (not inside initRunShow), uses the capture phase
+   so scroll containers cannot eat the event, and uses rsIsAnyModalOpen()
+   to correctly check modal visibility.
+
+   Why capture phase? The rs-canvas-area scroll container is overflow:auto.
+   Without capture, the browser may scroll it on ArrowKey before our handler
+   fires. Capture fires top-down (window → document → ... → target), before
+   any element scroll handler can consume the event.
+*/
+document.addEventListener('keydown', e => {
+  const k = e.key;
+  if (k !== 'ArrowLeft' && k !== 'ArrowRight' && k !== '[' && k !== ']') return;
+  if (!document.getElementById('tab-runshow')?.classList.contains('tab-panel--active')) return;
+  const tag = e.target.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+  if (e.target.isContentEditable) return;
+  if (rsIsAnyModalOpen()) return;
+  if (rsPopoverOpen) return;
+  e.preventDefault();
+  rsChangePage(k === 'ArrowRight' || k === ']' ? 1 : -1);
+}, true /* capture phase */);
+
 // Keyboard in FAB popover
 document.addEventListener('keydown', e => {
   const pop = document.getElementById('run-note-popover');
@@ -2072,8 +2225,13 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Enter' && e.target.id !== 'rnp-text') { confirmFabNote(); return; }
   const num = parseInt(e.key);
   if (num >= 1 && num <= rsFlatChars.length) {
-    fabSelectedCharIdx = num - 1;
-    document.getElementById('rnp-chars')?.querySelectorAll('.popover-char').forEach((el, i) => el.classList.toggle('popover-char--active', i === num - 1));
+    const idx = num - 1;
+    if (fabSelectedCharIdxs.has(idx)) {
+      if (fabSelectedCharIdxs.size > 1) fabSelectedCharIdxs.delete(idx);
+    } else {
+      fabSelectedCharIdxs.add(idx);
+    }
+    document.getElementById('rnp-chars')?.querySelectorAll('.popover-char').forEach((el, i) => el.classList.toggle('popover-char--active', fabSelectedCharIdxs.has(i)));
     return;
   }
   const typeKeys = { 's': 'skp', 'p': 'para', 'l': 'line', 'a': 'add', 'g': 'gen' };
@@ -2213,19 +2371,7 @@ async function generateRunReport(sessionId) {
 
   const cast = getCastMembers();
   const byCastId = {};
-  sessionNotes.forEach(n => {
-    const castId = n.castId;
-    if (!byCastId[castId]) {
-      const member = cast.find(m => m.id === castId);
-      byCastId[castId] = {
-        actorName: member?.name || n.characterName || '?',
-        actorEmail: member?.email || '',
-        color: member?.color || n.charColor || '#888',
-        notes: [],
-      };
-    }
-    byCastId[castId].notes.push(n);
-  });
+  sessionNotes.forEach(n => _expandNoteIntoByCastId(n, byCastId, cast));
 
   const prodTitle = state.activeProduction?.title || '';
   const dateStr = session.date?.toDate
@@ -2405,19 +2551,7 @@ async function emailReport() {
   // Group notes by cast member
   const cast = getCastMembers();
   const byCastId = {};
-  sessionNotes.forEach(n => {
-    const castId = n.castId || n.charId;
-    if (!byCastId[castId]) {
-      const member = cast.find(m => m.id === castId);
-      byCastId[castId] = {
-        actorName: member?.name || n.characterName || n.charName || '?',
-        actorEmail: member?.email || '',
-        color: member?.color || n.charColor || '#888',
-        notes: [],
-      };
-    }
-    byCastId[castId].notes.push(n);
-  });
+  sessionNotes.forEach(n => _expandNoteIntoByCastId(n, byCastId, cast));
 
   const show = state.activeProduction?.title || '';
   const dateStr = session.date?.toDate
@@ -2649,19 +2783,7 @@ function rsOpenSendNotes() {
 
   const cast = getCastMembers();
   const byCastId = {};
-  rsNotes.forEach(n => {
-    const castId = n.castId || n.charId;
-    if (!byCastId[castId]) {
-      const member = cast.find(m => m.id === castId);
-      byCastId[castId] = {
-        actorName: member?.name || n.characterName || n.charName || '?',
-        actorEmail: member?.email || '',
-        color: member?.color || n.charColor || '#888',
-        notes: [],
-      };
-    }
-    byCastId[castId].notes.push(n);
-  });
+  rsNotes.forEach(n => _expandNoteIntoByCastId(n, byCastId, cast));
 
   const date = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
   const show = state.activeProduction?.title || '';

@@ -1402,7 +1402,7 @@
     <div class="app-tabbar">
       <button class="app-tab app-tab--active" data-tab="runshow">Run Show</button>
       <button class="app-tab" data-tab="tracking">Tracking</button>
-      <button class="app-tab" data-tab="linenotes">Script Editor</button>
+      <button class="app-tab" data-tab="linenotes">Edit Script</button>
       <button class="app-tab" data-tab="cast">Cast &amp; Crew</button>
       <button class="app-tab" data-tab="settings">Settings</button>
     </div>
@@ -1465,10 +1465,6 @@
                 <button id="rs-next-page">&#x203a;</button>
               </div>
               <span id="rs-script-offset-badge" style="display:none;font-family:'DM Mono',monospace;font-size:10px;color:var(--gold);border:1px solid #c8a96e44;border-radius:3px;padding:2px 6px;margin-left:2px;" title="Script page offset active"></span>
-              <div style="position:relative;display:inline-block;">
-                <button class="ln-header-btn" id="rs-bookmarks-btn" style="display:none;" title="Jump to bookmark">☆ Bookmarks</button>
-                <div id="rs-bookmarks-menu" style="display:none;position:absolute;top:calc(100% + 4px);left:0;background:var(--bg-card);border:1px solid var(--bg-border);border-radius:6px;min-width:160px;box-shadow:0 4px 16px rgba(0,0,0,0.4);z-index:200;overflow:hidden;"></div>
-              </div>
               <button class="ln-header-btn" id="rs-split-btn">2-up</button>
             </div>
 
@@ -1487,7 +1483,7 @@
             </div>
 
             <!-- Script canvas area (flex:1, always present, shows page wrapper when loaded) -->
-            <div id="rs-canvas-area" tabindex="-1" style="flex:1;overflow:auto;display:flex;align-items:flex-start;justify-content:center;padding:20px;background:var(--bg-deep);position:relative;min-height:0;outline:none;">
+            <div id="rs-canvas-area" style="flex:1;overflow:auto;display:flex;align-items:flex-start;justify-content:center;padding:20px;background:var(--bg-deep);position:relative;min-height:0;">
               <div id="rs-page-wrapper" style="position:relative;box-shadow:0 8px 48px rgba(0,0,0,0.6);display:none;flex-shrink:0;">
                 <canvas id="rs-canvas" style="display:block;background:#faf8f3;"></canvas>
                 <div id="rs-hit-overlay" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:10;"></div>
@@ -1581,7 +1577,7 @@
       <!-- EDIT SCRIPT TAB (renamed from Line Notes — Features 4+5) -->
       <div class="tab-panel" id="tab-linenotes">
         <div class="ln-subtabs" id="ln-subtabs">
-          <button class="ln-subtab ln-subtab--active" data-lntab="zones">Script Zones</button>
+          <button class="ln-subtab ln-subtab--active" data-lntab="zones">Line Notes</button>
           <button class="ln-subtab" data-lntab="cues">Cues &amp; Diagrams</button>
         </div>
     <div class="ln-header">
@@ -1600,7 +1596,6 @@
       <button class="ln-header-btn" id="ln-split-btn">2-up</button>
       <button class="ln-header-btn ln-header-btn--active" id="ln-view-zones-btn">Zones</button>
       <button class="ln-header-btn" id="ln-place-cue-btn" title="Click a spot on the page to place a script cue">Place Cue</button>
-      <button class="ln-header-btn" id="ln-bookmark-btn" title="Bookmark this page">☆</button>
     </div>
 
     <div class="ln-body">
@@ -1622,7 +1617,7 @@
                 <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:3px;">Type</label>
                 <select id="ze-cue-type" class="form-select" style="width:100%;padding:5px 8px;background:var(--bg-raised);border:1px solid var(--bg-border);color:var(--text-primary);border-radius:4px;font-size:12px;">
                   <option value="LX">LX</option><option value="SQ">SQ</option><option value="PX">PX</option>
-                  <option value="FLY">FLY</option><option value="CARP">CARP</option><option value="BLOCK">BLOCK</option><option value="OTHER">OTHER</option>
+                  <option value="FLY">FLY</option><option value="CARP">CARP</option><option value="OTHER">OTHER</option>
                 </select>
               </div>
               <div style="margin-bottom:8px;">

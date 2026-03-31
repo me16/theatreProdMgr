@@ -19,6 +19,7 @@ const TYPE_COLORS = {
   PX:    { bg: '#1A2A1A', fg: '#2D8A4E' },
   FLY:   { bg: '#2E2C29', fg: '#9A9488' },
   CARP:  { bg: '#2E2C29', fg: '#9A9488' },
+  BLOCK: { bg: '#3a2800', fg: '#f5a623' },
   OTHER: { bg: '#2E2C29', fg: '#9A9488' },
 };
 

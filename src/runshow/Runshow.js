@@ -25,12 +25,12 @@ import {
 import { ref, getDownloadURL, uploadBytesResumable } from 'firebase/storage';
 import { getCastMembers } from '../cast/cast.js';
 import {
-  getPropStatus, getProps, startTimer, holdTimer, stopTimer,
-  startRunSession, endRunSession, setRunShowNotifyCallback,
+  getPropStatus, getProps,
+  startRunSession, endRunSession,
 } from '../props/props.js';
 import { detectActiveSession, showRecoveryDialog, hydrateSessionFromFirestore, abandonSession, startSessionSync, syncSessionToFirestore } from '../shared/session-sync.js';
 import { renderMarginCues, renderCueDetailPanel, renderCueSummaryPanel } from './cue-margin.js';
-import { renderTrackingWidget, refreshWidgetBadges, refreshWidgetContent } from '../tracking/stage-widget.js';
+import { renderTrackingWidget } from '../tracking/stage-widget.js';
 // Zone extraction is self-contained in runshow.js — no linenotes imports needed for rendering
 // Script page label helpers are defined locally below (rsScriptLabel / rsScriptOffset).
 
@@ -81,9 +81,6 @@ let rsSelectedCue = null;
 let rsDiagramPanelMode = 'diagrams'; // 'diagrams' | 'cues'
 let rsShowActorPills = false;         // toggle actor name pills on assigned zones
 
-// Timer-driven page tracking — last script page the timer navigated to
-let rsLastTimerScriptPage = 0;
-
 // Bookmarks (loaded from state.activeProduction.scriptBookmarks)
 let rsBookmarks = [];
 
@@ -130,8 +127,8 @@ function rsScriptOffset(pdfPage, half, useSplit) {
  * In split mode each half is a distinct numbered page (no L/R suffix in label).
  * Pages before the script start get "i-N" labels.
  */
-function rsScriptLabel(pdfPage, half) {
-  const offset = rsScriptOffset(pdfPage, half, rsSplitMode);
+function rsScriptLabel(pdfPage, half, useSplit = rsSplitMode) {
+  const offset = rsScriptOffset(pdfPage, half, useSplit);
   return offset < 0 ? ('i' + offset) : String(offset + 1);
 }
 
@@ -195,13 +192,6 @@ function formatTime(s) {
    INIT
    ═══════════════════════════════════════════════════════════ */
 export function initRunShow() {
-  // Register the timer re-render callback with props.js
-  setRunShowNotifyCallback(() => {
-    if (document.getElementById('tab-runshow')?.classList.contains('tab-panel--active')) {
-      rsTickTimerDisplay(); // lightweight update — no full re-render
-    }
-  });
-
   // Run Show is the default active tab, so tabs.js never fires its activation
   // callback on first production open. Watch for when app-view becomes visible
   // and trigger initialization ourselves if Run Show is still the active tab.
@@ -234,6 +224,7 @@ export function initRunShow() {
   // Popover buttons
   document.getElementById('rs-pop-cancel-btn')?.addEventListener('click', e => { e.stopPropagation(); rsClosePopover(); });
   document.getElementById('rs-pop-confirm-btn')?.addEventListener('click', e => { e.stopPropagation(); rsConfirmNote(); });
+  document.getElementById('rs-pop-delete-btn')?.addEventListener('click', e => { e.stopPropagation(); rsDeleteNoteFromPopover(); });
 
   // Quick-entry FAB
   document.getElementById('run-show-fab')?.addEventListener('click', openFabPopover);
@@ -445,8 +436,6 @@ export function resetRunShow() {
   if (rsDiagramsUnsub) { rsDiagramsUnsub(); rsDiagramsUnsub = null; }
   rsDiagrams = [];
   rsDiagramZoomLevel = 1;
-  // Reset timer page tracking
-  rsLastTimerScriptPage = 0;
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -473,30 +462,15 @@ function renderRunShowControls() {
   }
 
   const session = state.runSession;
-  const elapsed = session?.timerElapsed || 0;
-  const totalSec = (session?.timerDuration || 120) * 60;
-  const pct = totalSec > 0 ? Math.min(100, (elapsed / totalSec) * 100) : 0;
-  const elapsedStr = formatTime(elapsed);
-  const remainStr = formatTime(Math.max(0, totalSec - elapsed));
-  const tp = session?.timerTotalPages || 100;
-  const secPerPage = tp > 0 ? totalSec / tp : 0;
-  const nextTurnSec = secPerPage > 0 ? Math.max(0, secPerPage - (elapsed % secPerPage)) : 0;
 
   const stageCols = renderStageColumnsHtml(rsCurrentScriptPage());
 
   if (!session) {
     // PRE-RUN / IDLE MODE
-    const lastDuration  = localStorage.getItem('lastRunDuration')  || '120';
-    const lastWarnPages = localStorage.getItem('lastRunWarnPages') || '5';
     const lastTotalPages = state.activeProduction?.scriptPageCount || '100';
     container.innerHTML = `
       <div class="rs-controls-inner">
         <button class="rs-start-run-btn" id="rs-start-run-btn">▶ Start Run</button>
-        <div class="rs-timer-preview">
-          <div class="rs-timer-field"><label>Total Pages</label><span>${escapeHtml(String(lastTotalPages))}</span></div>
-          <div class="rs-timer-field"><label>Duration (min)</label><span>${escapeHtml(lastDuration)}</span></div>
-          <div class="rs-timer-field"><label>Warn Pages</label><span>${escapeHtml(lastWarnPages)}</span></div>
-        </div>
         <div class="rs-tracking-widget"></div>
         <div class="rs-reports-section" id="rs-reports-section"></div>
       </div>`;
@@ -504,28 +478,11 @@ function renderRunShowControls() {
     loadReportsHistory();
   } else {
     // ACTIVE RUN MODE
-    const timerRunning = session.timerRunning;
-    const timerHeld    = session.timerHeld;
     container.innerHTML = `
       <div class="rs-controls-inner">
         <div class="rs-session-header">
           <span class="rs-session-title">${escapeHtml(session.title)}</span>
-          <span class="rs-session-elapsed">${elapsedStr}</span>
           <button class="rs-end-run-btn" id="rs-end-run-btn">■ End Run</button>
-        </div>
-        <div class="rs-timer-panel">
-          <div class="rs-timer-progress"><div class="rs-timer-progress-bar" style="width:${pct}%"></div></div>
-          <div class="rs-timer-display">
-            <span>Elapsed: ${elapsedStr}</span>
-            <span>Remaining: ${remainStr}</span>
-            <span>Next turn: ${formatTime(nextTurnSec)}</span>
-          </div>
-          <div class="rs-timer-btns">
-            <button class="timer-btn timer-btn--start" id="rs-timer-start" ${timerRunning && !timerHeld ? 'disabled' : ''}>${timerHeld ? 'Resume' : 'Start'}</button>
-            <button class="timer-btn timer-btn--hold" id="rs-timer-hold" ${!timerRunning || timerHeld ? 'disabled' : ''}>Hold Page</button>
-            <button class="timer-btn timer-btn--stop" id="rs-timer-stop" ${!timerRunning && !timerHeld ? 'disabled' : ''}>Stop</button>
-          </div>
-          <div class="rs-timer-page">Page: <strong>${rsScriptLabel(rsCurrentPage, rsCurrentHalf)}</strong></div>
         </div>
         <div class="rs-tracking-widget"></div>
         <div class="rs-scratchpad-section">
@@ -535,18 +492,6 @@ function renderRunShowControls() {
       </div>`;
 
     container.querySelector('#rs-end-run-btn').addEventListener('click', openEndRunModal);
-    container.querySelector('#rs-timer-start')?.addEventListener('click', () => {
-      startTimer();
-      renderRunShowControls();
-    });
-    container.querySelector('#rs-timer-hold')?.addEventListener('click', () => {
-      holdTimer();
-      renderRunShowControls();
-    });
-    container.querySelector('#rs-timer-stop')?.addEventListener('click', () => {
-      stopTimer();
-      renderRunShowControls();
-    });
     container.querySelector('#rs-scratchpad')?.addEventListener('input', e => {
       if (state.runSession) state.runSession.scratchpad = e.target.value;
     });
@@ -559,76 +504,7 @@ function renderRunShowControls() {
   // P6: Populate tracking widget after either branch renders
   const _twContainer = container.querySelector('.rs-tracking-widget');
   if (_twContainer) {
-    renderTrackingWidget(_twContainer, rsCurrentScriptPage(), state.runSession?.timerWarnPages || 5);
-  }
-}
-
-
-
-/* ═══════════════════════════════════════════════════════════
-   TIMER TICK — lightweight update (no full re-render)
-   Updates only the timer values without replacing the entire
-   controls panel HTML, preserving scratchpad focus and state.
-   ═══════════════════════════════════════════════════════════ */
-function rsTickTimerDisplay() {
-  const session = state.runSession;
-  if (!session) return;
-
-  // Defensive: re-populate sidebar show name if it was cleared
-  const _sn = document.getElementById('rs-show-name');
-  if (_sn && !_sn.textContent && state.activeProduction?.title) {
-    _sn.textContent = state.activeProduction.title;
-  }
-
-  const elapsed = session.timerElapsed || 0;
-  const totalSec = (session.timerDuration || 120) * 60;
-  const pct = totalSec > 0 ? Math.min(100, (elapsed / totalSec) * 100) : 0;
-  const elapsedStr = formatTime(elapsed);
-  const remainStr = formatTime(Math.max(0, totalSec - elapsed));
-  const tp = session.timerTotalPages || 100;
-  const secPerPage = tp > 0 ? totalSec / tp : 0;
-  const nextTurnSec = secPerPage > 0 ? Math.max(0, secPerPage - (elapsed % secPerPage)) : 0;
-
-  // Auto-advance PDF page when timer advances (unless held)
-  const timerPage = session.currentPage || 1;
-  if (session.timerRunning && !session.timerHeld && timerPage !== rsLastTimerScriptPage) {
-    rsLastTimerScriptPage = timerPage;
-    rsNavigateToScriptPage(timerPage);
-  }
-
-  // Update progress bar
-  const progressBar = document.querySelector('.rs-timer-progress-bar');
-  if (progressBar) progressBar.style.width = pct + '%';
-
-  // Update timer display text
-  const timerDisplay = document.querySelector('.rs-timer-display');
-  if (timerDisplay) {
-    timerDisplay.innerHTML = '<span>Elapsed: ' + elapsedStr + '</span><span>Remaining: ' + remainStr + '</span><span>Next turn: ' + formatTime(nextTurnSec) + '</span>';
-  }
-
-  // Update elapsed in session header
-  const elapsedEl = document.querySelector('.rs-session-elapsed');
-  if (elapsedEl) elapsedEl.textContent = elapsedStr;
-
-  // Update page display
-  const pageEl = document.querySelector('.rs-timer-page');
-  if (pageEl) pageEl.innerHTML = 'Page: <strong>' + rsScriptLabel(rsCurrentPage, rsCurrentHalf) + '</strong>';
-
-  // Update button states
-  const timerRunning = session.timerRunning;
-  const timerHeld = session.timerHeld;
-  const startBtn = document.getElementById('rs-timer-start');
-  const holdBtn = document.getElementById('rs-timer-hold');
-  const stopBtn = document.getElementById('rs-timer-stop');
-  if (startBtn) { startBtn.disabled = timerRunning && !timerHeld; startBtn.textContent = timerHeld ? 'Resume' : 'Start'; }
-  if (holdBtn) holdBtn.disabled = !timerRunning || timerHeld;
-  if (stopBtn) stopBtn.disabled = !timerRunning && !timerHeld;
-
-  // P6: Update tracking widget — refresh active tab content + badges
-  const _twEl = document.querySelector('.rs-tracking-widget');
-  if (_twEl) {
-    refreshWidgetContent(_twEl, rsCurrentScriptPage(), state.runSession?.timerWarnPages || 5);
-    refreshWidgetBadges(_twEl, rsCurrentScriptPage(), state.runSession?.timerWarnPages || 5);
+    renderTrackingWidget(_twContainer, rsCurrentScriptPage(), 5);
   }
 }
 
@@ -638,7 +514,7 @@ function renderStageColumnsHtml(page) {
   const slProps = [], onProps = [], srProps = [];
   props.forEach(p => {
     const r = getPropStatus(p, page);
-    const warnPgs = state.runSession?.timerWarnPages || 5;
+    const warnPgs = 5;
     const warn = r.upcomingEnter && (r.upcomingEnter - page) <= warnPgs && (r.upcomingEnter - page) > 0;
     const item = { prop: p, ...r, warn };
     const loc = (r.location || '').toUpperCase().replace('STAGE LEFT','SL').replace('STAGE RIGHT','SR').replace('ON STAGE','ON').replace('ONSTAGE','ON');
@@ -1573,6 +1449,8 @@ function rsBuildPopover(selCharId, selType, lineText) {
 
   const confirmBtn = document.getElementById('rs-pop-confirm-btn');
   if (confirmBtn) confirmBtn.textContent = rsPendingNote?.editId ? 'Update \u21b5' : 'Add Note \u21b5';
+  const deleteBtn = document.getElementById('rs-pop-delete-btn');
+  if (deleteBtn) deleteBtn.style.display = rsPendingNote?.editId ? '' : 'none';
 }
 
 function rsPositionPopover(mx, my) {
@@ -1643,6 +1521,19 @@ async function rsConfirmNote() {
     }
     toast('Note ' + (rsPendingNote.editId ? 'updated' : 'added'));
   } catch(e) { toast('Failed to save note', 'error'); }
+  rsClosePopover();
+}
+
+async function rsDeleteNoteFromPopover() {
+  if (!rsPendingNote?.editId) return;
+  const note = rsNotes.find(n => n.id === rsPendingNote.editId);
+  if (!note) { rsClosePopover(); return; }
+  if (note.uid !== state.currentUser.uid && !isOwner()) { toast('Can only delete your own notes', 'error'); return; }
+  const pid = state.activeProduction.id;
+  try {
+    await deleteDoc(doc(db, 'productions', pid, 'lineNotes', note.id));
+    toast('Note deleted');
+  } catch(e) { toast('Failed to delete', 'error'); }
   rsClosePopover();
 }
 
@@ -2045,7 +1936,7 @@ function _buildActorEmailBody(actorName, notes, show, dateStr) {
     const typeLabel = NOTE_TYPE_LABELS[n.type] || n.type.toUpperCase();
     const lineText = (n.lineText || '').slice(0, 150) + ((n.lineText || '').length > 150 ? '...' : '');
     body += '\n---------';
-    body += '\nPage: ' + rsScriptLabel(n.page, n.half);
+    body += '\nPage: ' + rsScriptLabel(n.page, n.half, !!n.half);
     body += '\nType: ' + typeLabel;
     if (lineText) body += '\nLine: "' + lineText + '"';
     if (n.noteBody && n.noteBody.trim()) body += '\nNote: ' + n.noteBody.trim();
@@ -2249,8 +2140,6 @@ function openPreRunModal() {
   if (existing) existing.remove();
 
   const defaultTitle = `${state.activeProduction?.title || 'Run'} — ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
-  const lastDuration  = localStorage.getItem('lastRunDuration')  || '120';
-  const lastWarnPages = localStorage.getItem('lastRunWarnPages') || '5';
   const lastTotalPages = state.activeProduction?.scriptPageCount || '100';
 
   const backdrop = document.createElement('div');
@@ -2262,10 +2151,6 @@ function openPreRunModal() {
       <input type="text" id="prm-title" maxlength="200" value="${escapeHtml(defaultTitle)}" />
       <label>Total Pages</label>
       <input type="number" id="prm-pages" min="1" value="${escapeHtml(String(lastTotalPages))}" />
-      <label>Duration (minutes)</label>
-      <input type="number" id="prm-duration" min="1" value="${escapeHtml(lastDuration)}" />
-      <label>Warn Pages</label>
-      <input type="number" id="prm-warn" min="0" value="${escapeHtml(lastWarnPages)}" />
       <div class="modal-btns">
         <button class="modal-btn-cancel" id="prm-cancel">Cancel</button>
         <button class="modal-btn-primary" id="prm-start">Start Run</button>
@@ -2277,14 +2162,10 @@ function openPreRunModal() {
   backdrop.addEventListener('click', e => { if (e.target === backdrop) backdrop.remove(); });
   backdrop.querySelector('#prm-start').addEventListener('click', async () => {
     const title = sanitizeName(backdrop.querySelector('#prm-title').value) || defaultTitle;
-    const pages    = parseInt(backdrop.querySelector('#prm-pages').value) || 100;
-    const duration = parseInt(backdrop.querySelector('#prm-duration').value) || 120;
-    const warnPgs  = parseInt(backdrop.querySelector('#prm-warn').value) || 5;
-    localStorage.setItem('lastRunDuration', String(duration));
-    localStorage.setItem('lastRunWarnPages', String(warnPgs));
+    const pages = parseInt(backdrop.querySelector('#prm-pages').value) || 100;
     backdrop.remove();
     try {
-      await startRunSession(title, pages, duration, warnPgs);
+      await startRunSession(title, pages);
       // Feature 3: track session ID, clear notes, re-subscribe
       rsLastSessionId = state.runSession.sessionId;
       rsNotes = [];

@@ -20,12 +20,9 @@ export async function syncSessionToFirestore() {
   if (!pid || !sid) return;
   try {
     await updateDoc(doc(db, 'productions', pid, 'sessions', sid), {
-      liveElapsedSeconds: state.runSession.timerElapsed || 0,
       liveCurrentPage: state.runSession.currentPage || 1,
       liveHoldLog: state.runSession.holdLog || [],
       liveScratchpad: state.runSession.scratchpad || '',
-      liveTimerRunning: state.runSession.timerRunning || false,
-      liveTimerHeld: state.runSession.timerHeld || false,
       lastSyncTimestamp: serverTimestamp(),
     });
     _updateHeartbeat(true);
@@ -86,23 +83,10 @@ export function showRecoveryDialog(sessionData) {
 }
 
 export function hydrateSessionFromFirestore(sessionData) {
-  const now = Date.now();
-  const lastSync = sessionData.lastSyncTimestamp?.toMillis?.() || now;
-  const drift = (now - lastSync) / 1000;
-  let elapsed = sessionData.liveElapsedSeconds || 0;
-  if (sessionData.liveTimerRunning) elapsed += drift;
   state.runSession = {
     sessionId: sessionData.id,
     title: sessionData.title || 'Recovered Session',
-    timerRunning: false,
-    timerHeld: sessionData.liveTimerHeld || false,
-    timerElapsed: elapsed,
-    timerTotalPages: sessionData.totalPages || 100,
-    timerDuration: sessionData.targetDurationMinutes || 120,
-    timerWarnPages: sessionData.warnPages || 5,
     currentPage: sessionData.liveCurrentPage || 1,
-    timerInterval: null,
-    holdStartTime: null,
     holdLog: sessionData.liveHoldLog || [],
     scratchpad: sessionData.liveScratchpad || '',
   };

@@ -761,6 +761,8 @@
     .popover-btn--confirm:hover { background: #d4b97e; border-color: #d4b97e; }
     .popover-btn--cancel { background: transparent; color: var(--text-muted); border: 1px solid var(--bg-border); }
     .popover-btn--cancel:hover { color: var(--text-secondary); border-color: #3d3a36; }
+    .popover-btn--delete { background: transparent; color: #e63946; border: 1px solid #e63946; }
+    .popover-btn--delete:hover { background: #e6394622; }
 
     /* Processing overlay */
     .processing-overlay {
@@ -1536,6 +1538,7 @@
         <textarea id="rs-pop-note-text" class="form-input" placeholder="Optional note…" maxlength="500" rows="2" style="margin:6px 8px 0;width:calc(100% - 16px);min-height:40px;resize:vertical;font-size:12px;"></textarea>
         <div class="popover-btns">
           <button class="popover-btn popover-btn--cancel" id="rs-pop-cancel-btn">Cancel</button>
+          <button class="popover-btn popover-btn--delete" id="rs-pop-delete-btn" style="display:none;">Delete</button>
           <button class="popover-btn popover-btn--confirm" id="rs-pop-confirm-btn">Add Note &#x21b5;</button>
         </div>
       </div>

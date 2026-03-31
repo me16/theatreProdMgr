@@ -719,7 +719,7 @@ function _notifyRunShow() { if (_runShowNotify) _runShowNotify(); }
  * Security: sessions subcollection is readable by all production members;
  * create is allowed by any member; update/delete restricted to creator or owner.
  */
-export async function startRunSession(sessionTitle, totalPages, durationMin, warnPages) {
+export async function startRunSession(sessionTitle, totalPages) {
   const pid = state.activeProduction.id;
   const uid = state.currentUser.uid;
 
@@ -735,18 +735,11 @@ export async function startRunSession(sessionTitle, totalPages, durationMin, war
     holdLog: [],
     totalHoldSeconds: 0,
     totalPages: totalPages,
-    targetDurationMinutes: durationMin,
-    warnPages: warnPages,
     createdBy: uid,
     scratchpadNotes: '',
     status: 'active',
     reportHtml: '',
-    liveElapsedSeconds: 0,
     liveCurrentPage: 1,
-    liveHoldLog: [],
-    liveScratchpad: '',
-    liveTimerRunning: false,
-    liveTimerHeld: false,
     lastSyncTimestamp: serverTimestamp(),
     noteCount: 0,
     notesByActor: {},
@@ -756,21 +749,10 @@ export async function startRunSession(sessionTitle, totalPages, durationMin, war
   state.runSession = {
     sessionId: sessionRef.id,
     title: sessionTitle,
-    timerRunning: false,
-    timerHeld: false,
-    timerElapsed: 0,
-    timerTotalPages: totalPages,
-    timerDuration: durationMin,
-    timerWarnPages: warnPages,
     currentPage: 1,
-    timerInterval: null,
-    holdStartTime: null,
     holdLog: [],
     scratchpad: '',
   };
-
-  // 3. Start the timer immediately
-  startTimer(totalPages, durationMin);
 
   // P0: Start periodic Firestore sync
   startSessionSync();
@@ -786,7 +768,6 @@ export async function endRunSession(scratchpadText) {
   // Capture session data BEFORE clearing state
   const sid = state.runSession.sessionId;
   const pid = state.activeProduction.id;
-  const elapsed = state.runSession.timerElapsed;
   const holdLog = state.runSession.holdLog || [];
   const totalHold = holdLog.reduce((s, h) => s + (h.durationSeconds || 0), 0);
 
@@ -794,18 +775,10 @@ export async function endRunSession(scratchpadText) {
   stopSessionSync();
   await syncSessionToFirestore();
 
-  // Clear the timer interval without triggering re-renders via _notifyRunShow
-  const iv = getTimerState().timerInterval;
-  if (iv) { clearInterval(iv); setTimerField('timerInterval', null); }
-
   // Null out session BEFORE any UI can re-render
   state.runSession = null;
 
-  // Clean up timer state that stopTimer() normally handles
   _warnedProps.clear();
-  _timerRunning = false;
-  _timerHeld = false;
-  _timerElapsed = 0;
 
   hideHeartbeat();
 
@@ -816,7 +789,6 @@ export async function endRunSession(scratchpadText) {
   // Security rule note: sessions update restricted to creator (createdBy == uid) or owner role
   await updateDoc(doc(db, 'productions', pid, 'sessions', sid), {
     endedAt: serverTimestamp(),
-    durationSeconds: elapsed,
     holdLog: holdLog,
     totalHoldSeconds: totalHold,
     scratchpadNotes: scratchpadText || '',

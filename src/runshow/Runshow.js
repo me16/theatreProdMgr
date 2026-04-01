@@ -54,6 +54,7 @@ let rsNotesUnsub = null;
 let rsRenderGen = 0;
 let rsNotesHoveredZoneIdx = null;
 let rsCurrentRenderTask = null; // active pdf.js render task — cancelled before starting a new one
+let rsClockInterval = null;      // run-session count-up clock ticker
 
 // Drawing state
 let rsDrawStart = null;
@@ -186,6 +187,102 @@ function rsBuildFlatChars() {
 function formatTime(s) {
   const m = Math.floor(s / 60); const sec = Math.floor(s % 60);
   return m + ':' + (sec < 10 ? '0' : '') + sec;
+}
+
+function formatElapsed(ms) {
+  const totalSec = Math.floor(ms / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  return h > 0
+    ? `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`
+    : `${m}:${String(s).padStart(2,'0')}`;
+}
+
+/** Active elapsed ms since run start, excluding hold time. */
+function rsActiveElapsedMs() {
+  const s = state.runSession;
+  if (!s || !s.startedAt) return 0;
+  const now = Date.now();
+  const closedHolds = (s.holdLog || []).reduce((sum, h) => sum + (h.durationSeconds || 0) * 1000, 0);
+  const openHold = s.isOnHold && s.holdStartTime ? (now - s.holdStartTime) : 0;
+  return Math.max(0, now - s.startedAt - closedHolds - openHold);
+}
+
+function rsStartClock() {
+  rsStopClock();
+  rsClockInterval = setInterval(() => { rsUpdateTimerDisplay(); rsTickAutoPlay(); }, 500);
+}
+
+function rsStopClock() {
+  if (rsClockInterval) { clearInterval(rsClockInterval); rsClockInterval = null; }
+}
+
+function rsUpdateTimerDisplay() {
+  if (!state.runSession) return;
+  const s = state.runSession;
+  const clockEl = document.getElementById('rs-clock');
+  if (clockEl) {
+    clockEl.textContent = formatElapsed(rsActiveElapsedMs());
+    clockEl.style.color = s.isOnHold ? 'var(--state-hold)' : 'var(--text-primary)';
+  }
+  const holdBtn = document.getElementById('rs-hold-btn');
+  if (holdBtn) {
+    holdBtn.textContent = s.isOnHold ? '▶ Resume' : '⏸ Hold';
+    holdBtn.classList.toggle('rs-hold-btn--active', !!s.isOnHold);
+  }
+  const apStatus = document.getElementById('rs-autoplay-status');
+  if (apStatus && s.autoPlay) {
+    const ap = s.autoPlay;
+    if (ap.index >= ap.log.length) {
+      apStatus.textContent = 'Auto ▶  complete';
+    } else {
+      const next = ap.log[ap.index];
+      const msUntil = Math.max(0, next.elapsedMs - rsActiveElapsedMs());
+      apStatus.textContent = `Auto ▶  p.${rsScriptLabel(next.page, next.half)} in ${formatElapsed(msUntil)}`;
+    }
+  }
+}
+
+function rsToggleHold() {
+  if (!state.runSession) return;
+  const s = state.runSession;
+  if (s.isOnHold) {
+    const holdDur = s.holdStartTime ? (Date.now() - s.holdStartTime) / 1000 : 0;
+    if (holdDur > 0) s.holdLog.push({ startedAt: s.holdStartTime, endedAt: Date.now(), durationSeconds: holdDur });
+    s.holdStartTime = null;
+    s.isOnHold = false;
+  } else {
+    s.holdStartTime = Date.now();
+    s.isOnHold = true;
+  }
+  rsUpdateTimerDisplay();
+}
+
+function rsTickAutoPlay() {
+  const ap = state.runSession?.autoPlay;
+  if (!ap || state.runSession.isOnHold || ap.index >= ap.log.length) return;
+  const elapsed = rsActiveElapsedMs();
+  while (ap.index < ap.log.length && elapsed >= ap.log[ap.index].elapsedMs) {
+    const entry = ap.log[ap.index++];
+    rsCurrentPage = entry.page;
+    rsCurrentHalf = entry.half || 'L';
+    const pageInput = document.getElementById('rs-page-input');
+    if (pageInput) pageInput.value = rsScriptLabel(rsCurrentPage, rsCurrentHalf);
+    rsRenderPage(rsCurrentPage);
+  }
+}
+
+async function loadRecordedSessions() {
+  const pid = state.activeProduction?.id;
+  if (!pid) return [];
+  try {
+    const snap = await getDocs(collection(db, 'productions', pid, 'sessions'));
+    return snap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .filter(s => s.status === 'ended' && s.pageLog && s.pageLog.length > 0)
+      .sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
+  } catch(e) { return []; }
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -394,6 +491,7 @@ export async function onRunShowTabActivated() {
   renderRunShowTab();
   rsLoadBookmarks();
   rsUpdateBookmarksBtn();
+  if (state.runSession) rsStartClock();
   document.getElementById('rs-canvas-area')?.focus({ preventScroll: true });
 }
 
@@ -419,6 +517,7 @@ async function rsLoadScriptPageOffset() {
 
 export function resetRunShow() {
   rsInitialized = false;
+  rsStopClock();
   if (rsCurrentRenderTask) {
     try { rsCurrentRenderTask.cancel(); } catch(e) { /* ignore */ }
     rsCurrentRenderTask = null;
@@ -484,6 +583,14 @@ function renderRunShowControls() {
           <span class="rs-session-title">${escapeHtml(session.title)}</span>
           <button class="rs-end-run-btn" id="rs-end-run-btn">■ End Run</button>
         </div>
+        <div class="rs-timer-panel">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+            <span id="rs-clock" style="font-family:'DM Mono',monospace;font-size:22px;letter-spacing:2px;">${formatElapsed(rsActiveElapsedMs())}</span>
+            <button id="rs-hold-btn" class="rs-hold-btn${session.isOnHold ? ' rs-hold-btn--active' : ''}">${session.isOnHold ? '▶ Resume' : '⏸ Hold'}</button>
+          </div>
+          ${session.isRecording ? '<div style="font-size:10px;color:var(--red);letter-spacing:1px;font-family:\'DM Mono\',monospace;">● REC</div>' : ''}
+          ${session.autoPlay ? '<div id="rs-autoplay-status" style="font-size:11px;color:var(--text-muted);font-family:\'DM Mono\',monospace;margin-top:2px;"></div>' : ''}
+        </div>
         <div class="rs-tracking-widget"></div>
         <div class="rs-scratchpad-section">
           <label style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);">Scratchpad</label>
@@ -492,6 +599,7 @@ function renderRunShowControls() {
       </div>`;
 
     container.querySelector('#rs-end-run-btn').addEventListener('click', openEndRunModal);
+    container.querySelector('#rs-hold-btn').addEventListener('click', rsToggleHold);
     container.querySelector('#rs-scratchpad')?.addEventListener('input', e => {
       if (state.runSession) state.runSession.scratchpad = e.target.value;
     });
@@ -1616,7 +1724,8 @@ function rsShowBookmarksMenu() {
     .sort((a, b) => a.page - b.page || (a.half > b.half ? 1 : -1))
     .map(b => {
       const label = rsScriptLabel(b.page, b.half || 'L');
-      return `<button class="rs-bookmark-item" data-page="${b.page}" data-half="${escapeHtml(b.half || 'L')}" style="display:block;width:100%;text-align:left;padding:8px 14px;background:none;border:none;color:var(--text-primary);font-family:'DM Mono',monospace;font-size:12px;cursor:pointer;border-bottom:1px solid var(--bg-border);">p.&nbsp;${escapeHtml(label)}</button>`;
+      const labelSuffix = b.label ? `<span style="color:var(--text-muted);margin-left:10px;">${escapeHtml(b.label)}</span>` : '';
+      return `<button class="rs-bookmark-item" data-page="${b.page}" data-half="${escapeHtml(b.half || 'L')}" style="display:block;width:100%;text-align:left;padding:8px 14px;background:none;border:none;color:var(--text-primary);font-family:'DM Mono',monospace;font-size:12px;cursor:pointer;border-bottom:1px solid var(--bg-border);">p.&nbsp;${escapeHtml(label)}${labelSuffix}</button>`;
     }).join('');
   menu.style.display = 'block';
   menu.querySelectorAll('.rs-bookmark-item').forEach(item => {
@@ -1656,6 +1765,10 @@ async function rsChangePage(delta) {
     if (next < 1 || next > rsTotalPages) return;
     rsCurrentPage = next;
   }
+  // Record page transition if recording
+  if (state.runSession?.isRecording) {
+    state.runSession.pageLog.push({ page: rsCurrentPage, half: rsCurrentHalf, elapsedMs: rsActiveElapsedMs() });
+  }
   const pageInput = document.getElementById('rs-page-input');
   if (pageInput) pageInput.value = rsScriptLabel(rsCurrentPage, rsCurrentHalf);
   await rsRenderPage(rsCurrentPage);
@@ -1686,7 +1799,7 @@ function rsIsAnyModalOpen() {
   if (reportModal && reportModal.style.display !== 'none') return true;
   return !!document.querySelector(
     '.cast-modal.open, .send-notes-modal.open, .char-modal.open, ' +
-    '.prop-notes-modal, .prop-photo-lightbox'
+    '.prop-notes-modal, .prop-photo-lightbox, .page-times-modal-backdrop'
   );
 }
 
@@ -2151,6 +2264,18 @@ function openPreRunModal() {
       <input type="text" id="prm-title" maxlength="200" value="${escapeHtml(defaultTitle)}" />
       <label>Total Pages</label>
       <input type="number" id="prm-pages" min="1" value="${escapeHtml(String(lastTotalPages))}" />
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:normal;margin-top:4px;">
+        <input type="checkbox" id="prm-record" style="width:auto;margin:0;" />
+        Record page times
+        <span style="color:var(--text-muted);font-size:11px;font-weight:normal;">(saves when each page is turned)</span>
+      </label>
+      <div id="prm-autoplay-row" style="display:none;margin-top:4px;">
+        <label>Auto-play from recorded run:</label>
+        <select id="prm-autoplay-select" style="width:100%;margin-top:4px;">
+          <option value="">— Off (manual paging) —</option>
+        </select>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Pages turn automatically at the recorded times. Use Hold to pause.</div>
+      </div>
       <div class="modal-btns">
         <button class="modal-btn-cancel" id="prm-cancel">Cancel</button>
         <button class="modal-btn-primary" id="prm-start">Start Run</button>
@@ -2158,14 +2283,47 @@ function openPreRunModal() {
     </div>`;
   document.body.appendChild(backdrop);
 
+  // Async: load recorded sessions and show autoplay option if any exist
+  loadRecordedSessions().then(sessions => {
+    if (sessions.length === 0) return;
+    const row = backdrop.querySelector('#prm-autoplay-row');
+    const sel = backdrop.querySelector('#prm-autoplay-select');
+    if (!row || !sel) return;
+    row.style.display = '';
+    sessions.forEach(s => {
+      const opt = document.createElement('option');
+      opt.value = s.id;
+      const dateStr = s.date?.toDate
+        ? s.date.toDate().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+        : '';
+      opt.textContent = `${s.title}${dateStr ? ' · ' + dateStr : ''} (${s.pageLog.length} pg turns)`;
+      sel.appendChild(opt);
+    });
+  });
+
   backdrop.querySelector('#prm-cancel').addEventListener('click', () => backdrop.remove());
   backdrop.addEventListener('click', e => { if (e.target === backdrop) backdrop.remove(); });
   backdrop.querySelector('#prm-start').addEventListener('click', async () => {
     const title = sanitizeName(backdrop.querySelector('#prm-title').value) || defaultTitle;
     const pages = parseInt(backdrop.querySelector('#prm-pages').value) || 100;
+    const recordChecked = backdrop.querySelector('#prm-record')?.checked || false;
+    const autoPlaySessionId = backdrop.querySelector('#prm-autoplay-select')?.value || '';
     backdrop.remove();
     try {
       await startRunSession(title, pages);
+      state.runSession.isRecording = recordChecked;
+
+      if (autoPlaySessionId) {
+        try {
+          const snap = await getDoc(doc(db, 'productions', state.activeProduction.id, 'sessions', autoPlaySessionId));
+          if (snap.exists()) {
+            const log = snap.data().pageLog || [];
+            if (log.length > 0) state.runSession.autoPlay = { log, index: 0 };
+          }
+        } catch(e) { console.warn('Could not load autoplay recording', e); }
+      }
+
+      rsStartClock();
       // Feature 3: track session ID, clear notes, re-subscribe
       rsLastSessionId = state.runSession.sessionId;
       rsNotes = [];
@@ -2212,6 +2370,7 @@ function openEndRunModal() {
     const sid = state.runSession?.sessionId;
     backdrop.remove();
     try {
+      rsStopClock();
       // Feature 3: Preserve last session ID
       rsLastSessionId = sid;
       await endRunSession(scratchText);
@@ -2576,6 +2735,84 @@ function _restoreReportView() {
   if (titleEl) titleEl.textContent = _currentReportHtml ? 'Run Report' : 'Run Report';
 }
 /* ═══════════════════════════════════════════════════════════
+   PAGE TIMES EDITOR
+   ═══════════════════════════════════════════════════════════ */
+function parseElapsedInput(str) {
+  // Parse "m:ss" or "h:mm:ss" back to milliseconds
+  const parts = str.trim().split(':').map(Number);
+  if (parts.some(isNaN)) return null;
+  let ms = 0;
+  if (parts.length === 2) ms = (parts[0] * 60 + parts[1]) * 1000;
+  else if (parts.length === 3) ms = (parts[0] * 3600 + parts[1] * 60 + parts[2]) * 1000;
+  else return null;
+  return ms >= 0 ? ms : null;
+}
+
+export function openPageTimesEditor(session, pid) {
+  const existing = document.querySelector('.page-times-modal-backdrop');
+  if (existing) existing.remove();
+
+  const log = session.pageLog || [];
+
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop page-times-modal-backdrop';
+  backdrop.innerHTML = `
+    <div class="modal-card" style="max-width:480px;width:100%;">
+      <h2 style="margin-bottom:4px;">Edit Page Times</h2>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">${escapeHtml(session.title || 'Untitled')}</div>
+      <div style="max-height:420px;overflow-y:auto;margin-bottom:16px;">
+        <table style="width:100%;border-collapse:collapse;">
+          <thead>
+            <tr>
+              <th style="text-align:left;font-size:11px;color:var(--text-muted);font-family:'DM Mono',monospace;text-transform:uppercase;letter-spacing:1px;padding:6px 8px;border-bottom:1px solid var(--bg-border);">Page</th>
+              <th style="text-align:left;font-size:11px;color:var(--text-muted);font-family:'DM Mono',monospace;text-transform:uppercase;letter-spacing:1px;padding:6px 8px;border-bottom:1px solid var(--bg-border);">Elapsed Time</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${log.map((entry, i) => `
+              <tr>
+                <td style="padding:6px 8px;font-family:'DM Mono',monospace;font-size:13px;color:var(--text-muted);white-space:nowrap;">p.${escapeHtml(rsScriptLabel(entry.page, entry.half))}</td>
+                <td style="padding:4px 8px;">
+                  <input type="text" class="pt-time-input" data-index="${i}"
+                    value="${escapeHtml(formatElapsed(entry.elapsedMs))}"
+                    style="width:100px;background:var(--bg-input,#0f0f1e);border:1px solid var(--bg-border);border-radius:4px;padding:4px 8px;color:var(--text-primary);font-family:'DM Mono',monospace;font-size:13px;outline:none;" />
+                </td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div class="modal-btns">
+        <button class="modal-btn-cancel" id="ptm-cancel">Cancel</button>
+        <button class="modal-btn-primary" id="ptm-save">Save</button>
+      </div>
+    </div>`;
+  document.body.appendChild(backdrop);
+
+  backdrop.querySelector('#ptm-cancel').addEventListener('click', () => backdrop.remove());
+  backdrop.addEventListener('click', e => { if (e.target === backdrop) backdrop.remove(); });
+
+  backdrop.querySelector('#ptm-save').addEventListener('click', async () => {
+    const inputs = backdrop.querySelectorAll('.pt-time-input');
+    const updatedLog = log.map((entry, i) => {
+      const parsed = parseElapsedInput(inputs[i].value);
+      return { ...entry, elapsedMs: parsed !== null ? parsed : entry.elapsedMs };
+    });
+
+    const invalid = Array.from(inputs).some((inp, i) => parseElapsedInput(inp.value) === null);
+    if (invalid) { toast('Fix invalid time values (use m:ss or h:mm:ss format)', 'error'); return; }
+
+    try {
+      await updateDoc(doc(db, 'productions', pid, 'sessions', session.id), { pageLog: updatedLog });
+      toast('Page times saved.', 'success');
+      backdrop.remove();
+    } catch(e) {
+      console.error('Failed to save page times', e);
+      toast('Failed to save page times.', 'error');
+    }
+  });
+}
+
+/* ═══════════════════════════════════════════════════════════
    REPORTS HISTORY
    ═══════════════════════════════════════════════════════════ */
 async function loadReportsHistory() {
@@ -2615,6 +2852,7 @@ async function loadReportsHistory() {
               <div style="color:var(--text-muted);font-size:11px;font-family:'DM Mono',monospace;">${dateStr} &middot; ${formatTime(s.durationSeconds || 0)} &middot; ${s.noteCount || 0} note${(s.noteCount || 0) !== 1 ? 's' : ''}</div>
             </div>
             <button class="settings-btn" data-id="${escapeHtml(s.id)}">View</button>
+            ${owner && s.pageLog?.length > 0 ? `<button class="settings-btn rs-edit-times" data-id="${escapeHtml(s.id)}">Edit Times</button>` : ''}
             ${owner ? `<button class="settings-btn settings-btn--danger rs-delete-report" data-id="${escapeHtml(s.id)}">Delete</button>` : ''}
           </div>`;
         }).join('')}
@@ -2623,6 +2861,7 @@ async function loadReportsHistory() {
     container.querySelectorAll('.rs-report-row').forEach(row => {
       row.addEventListener('click', async e => {
         if (e.target.classList.contains('rs-delete-report')) return;
+        if (e.target.classList.contains('rs-edit-times')) return;
         const sid = row.dataset.id;
         const session = sessions.find(s => s.id === sid);
         if (!session) return;
@@ -2635,6 +2874,16 @@ async function loadReportsHistory() {
     });
 
     if (owner) {
+      container.querySelectorAll('.rs-edit-times').forEach(btn => {
+        btn.addEventListener('click', async e => {
+          e.stopPropagation();
+          const sid = btn.dataset.id;
+          const session = sessions.find(s => s.id === sid);
+          if (!session) return;
+          openPageTimesEditor(session, pid);
+        });
+      });
+
       container.querySelectorAll('.rs-delete-report').forEach(btn => {
         btn.addEventListener('click', async e => {
           e.stopPropagation();

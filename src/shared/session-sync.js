@@ -18,6 +18,12 @@ export async function syncSessionToFirestore() {
   const pid = state.activeProduction?.id;
   const sid = state.runSession.sessionId;
   if (!pid || !sid) return;
+  if (state.runSession.createdBy && state.currentUser?.uid &&
+      state.runSession.createdBy !== state.currentUser.uid) {
+    console.warn('Session sync blocked: session belongs to a different user');
+    _updateHeartbeat(false);
+    return;
+  }
   try {
     await updateDoc(doc(db, 'productions', pid, 'sessions', sid), {
       liveCurrentPage: state.runSession.currentPage || 1,
@@ -85,10 +91,17 @@ export function showRecoveryDialog(sessionData) {
 export function hydrateSessionFromFirestore(sessionData) {
   state.runSession = {
     sessionId: sessionData.id,
+    createdBy: sessionData.createdBy || null,
     title: sessionData.title || 'Recovered Session',
     currentPage: sessionData.liveCurrentPage || 1,
     holdLog: sessionData.liveHoldLog || [],
     scratchpad: sessionData.liveScratchpad || '',
+    startedAt: sessionData.startedAt || Date.now(),
+    isOnHold: false,
+    holdStartTime: null,
+    isRecording: false,
+    pageLog: sessionData.pageLog || [],
+    autoPlay: null,
   };
   return state.runSession;
 }

@@ -5,10 +5,11 @@ import { toast } from '../shared/toast.js';
 import { escapeHtml, sanitizeName, genId, confirmDialog, downloadCSV } from '../shared/ui.js';
 import {
   collection, doc, addDoc, updateDoc, deleteDoc, onSnapshot, getDoc, setDoc,
-  serverTimestamp, query, where
+  getDocs, serverTimestamp, query, where
 } from 'firebase/firestore';
 import { ref, getDownloadURL, uploadBytesResumable } from 'firebase/storage';
 import { getCastMembers } from '../cast/cast.js';
+import { openPageTimesEditor } from '../runshow/Runshow.js';
 
 /*
  * linenotes.js now contains ONLY the Zone Editor view.
@@ -203,6 +204,9 @@ export function initLineNotes() {
   // Bookmark button
   document.getElementById('ln-bookmark-btn')?.addEventListener('click', lnToggleBookmark);
 
+  // Edit Times button
+  document.getElementById('ln-edit-times-btn')?.addEventListener('click', lnOpenEditTimes);
+
   // Cue placement mode: button + popover wiring
   document.getElementById('ln-place-cue-btn')?.addEventListener('click', zeToggleCueMode);
   document.getElementById('ze-cue-save')?.addEventListener('click', zeSavePlacedCue);
@@ -240,6 +244,8 @@ export async function onLineNotesTabActivated() {
   switchToZonesView();
   lnLoadBookmarks();
   lnUpdateBookmarkBtn();
+  const editTimesBtn = document.getElementById('ln-edit-times-btn');
+  if (editTimesBtn) editTimesBtn.style.display = isOwner() ? '' : 'none';
 }
 
 /** Fetch scriptPageStart fields from Firestore and apply them locally. */
@@ -1132,19 +1138,142 @@ async function lnToggleBookmark() {
   if (!pdfDoc) return;
   const half = splitMode ? currentHalf : 'L';
   const idx = lnBookmarks.findIndex(b => b.page === currentPage && b.half === half);
-  if (idx >= 0) {
-    lnBookmarks.splice(idx, 1);
+  const existing = idx >= 0 ? lnBookmarks[idx] : null;
+  const pageLabel = pdfPageToScriptLabel(currentPage, half);
+
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop ln-bookmark-modal';
+
+  if (existing) {
+    backdrop.innerHTML = `
+      <div class="modal-card" style="max-width:320px;width:100%;">
+        <h2 style="margin-bottom:16px;">Bookmark &mdash; p.&nbsp;${escapeHtml(pageLabel)}</h2>
+        <div style="margin-bottom:16px;">
+          <label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:6px;font-family:'DM Mono',monospace;">LABEL (optional)</label>
+          <input id="ln-bm-label" type="text" value="${escapeHtml(existing.label || '')}"
+            placeholder="e.g. Act 2 Scene 1"
+            style="width:100%;padding:8px 10px;background:var(--bg-raised);border:1px solid var(--bg-border);border-radius:6px;color:var(--text-primary);font-family:'DM Mono',monospace;font-size:12px;box-sizing:border-box;">
+        </div>
+        <div class="modal-btns" style="justify-content:space-between;">
+          <button class="modal-btn-cancel" id="ln-bm-remove" style="color:#e05252;">Remove</button>
+          <div style="display:flex;gap:8px;">
+            <button class="modal-btn-cancel" id="ln-bm-cancel">Cancel</button>
+            <button class="modal-btn-primary" id="ln-bm-save">Save</button>
+          </div>
+        </div>
+      </div>`;
   } else {
-    lnBookmarks.push({ id: genId(), page: currentPage, half, createdAt: Date.now() });
+    backdrop.innerHTML = `
+      <div class="modal-card" style="max-width:320px;width:100%;">
+        <h2 style="margin-bottom:16px;">Add Bookmark &mdash; p.&nbsp;${escapeHtml(pageLabel)}</h2>
+        <div style="margin-bottom:16px;">
+          <label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:6px;font-family:'DM Mono',monospace;">LABEL (optional)</label>
+          <input id="ln-bm-label" type="text"
+            placeholder="e.g. Act 2 Scene 1"
+            style="width:100%;padding:8px 10px;background:var(--bg-raised);border:1px solid var(--bg-border);border-radius:6px;color:var(--text-primary);font-family:'DM Mono',monospace;font-size:12px;box-sizing:border-box;">
+        </div>
+        <div class="modal-btns">
+          <button class="modal-btn-cancel" id="ln-bm-cancel">Cancel</button>
+          <button class="modal-btn-primary" id="ln-bm-save">Add Bookmark</button>
+        </div>
+      </div>`;
   }
-  lnUpdateBookmarkBtn();
-  if (!state.activeProduction?.id) return;
-  state.activeProduction.scriptBookmarks = lnBookmarks.slice();
+
+  document.body.appendChild(backdrop);
+  const labelInput = backdrop.querySelector('#ln-bm-label');
+  labelInput?.focus();
+  if (existing) labelInput?.select();
+
+  backdrop.querySelector('#ln-bm-cancel')?.addEventListener('click', () => backdrop.remove());
+  backdrop.addEventListener('click', e => { if (e.target === backdrop) backdrop.remove(); });
+
+  backdrop.querySelector('#ln-bm-remove')?.addEventListener('click', async () => {
+    backdrop.remove();
+    lnBookmarks.splice(idx, 1);
+    lnUpdateBookmarkBtn();
+    if (!state.activeProduction?.id) return;
+    state.activeProduction.scriptBookmarks = lnBookmarks.slice();
+    try {
+      await updateDoc(doc(db, 'productions', state.activeProduction.id), { scriptBookmarks: lnBookmarks });
+    } catch(e) { console.warn('Could not save bookmarks:', e); }
+  });
+
+  const doSave = async () => {
+    const label = labelInput?.value.trim() || '';
+    backdrop.remove();
+    if (existing) {
+      lnBookmarks[idx] = { ...existing, label: label || undefined };
+    } else {
+      lnBookmarks.push({ id: genId(), page: currentPage, half, createdAt: Date.now(), ...(label ? { label } : {}) });
+    }
+    lnUpdateBookmarkBtn();
+    if (!state.activeProduction?.id) return;
+    state.activeProduction.scriptBookmarks = lnBookmarks.slice();
+    try {
+      await updateDoc(doc(db, 'productions', state.activeProduction.id), { scriptBookmarks: lnBookmarks });
+    } catch(e) { console.warn('Could not save bookmarks:', e); }
+  };
+
+  backdrop.querySelector('#ln-bm-save')?.addEventListener('click', doSave);
+  labelInput?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') doSave();
+    if (e.key === 'Escape') backdrop.remove();
+  });
+}
+
+async function lnOpenEditTimes() {
+  const pid = state.activeProduction?.id;
+  if (!pid) return;
+  let sessions;
   try {
-    await updateDoc(doc(db, 'productions', state.activeProduction.id), {
-      scriptBookmarks: lnBookmarks,
+    const snap = await getDocs(collection(db, 'productions', pid, 'sessions'));
+    sessions = snap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .filter(s => s.status === 'ended' && s.pageLog?.length > 0)
+      .sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
+  } catch(e) {
+    toast('Could not load run reports.', 'error');
+    return;
+  }
+  if (sessions.length === 0) { toast('No run reports with page times available.'); return; }
+  if (sessions.length === 1) { openPageTimesEditor(sessions[0], pid); return; }
+
+  // Multiple sessions — show a picker
+  const existing = document.querySelector('.ln-edit-times-picker');
+  if (existing) { existing.remove(); return; }
+
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop ln-edit-times-picker';
+  backdrop.innerHTML = `
+    <div class="modal-card" style="max-width:400px;width:100%;">
+      <h2 style="margin-bottom:16px;">Choose Run Report</h2>
+      <div style="display:flex;flex-direction:column;gap:6px;max-height:320px;overflow-y:auto;margin-bottom:16px;">
+        ${sessions.map(s => {
+          const dateStr = s.date?.toDate
+            ? s.date.toDate().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+            : '—';
+          return `<button class="settings-btn ln-et-pick" data-id="${escapeHtml(s.id)}"
+            style="text-align:left;padding:8px 12px;display:flex;flex-direction:column;gap:2px;">
+            <span style="color:var(--text-primary);font-size:13px;font-weight:500;">${escapeHtml(s.title || 'Untitled')}</span>
+            <span style="color:var(--text-muted);font-size:11px;font-family:'DM Mono',monospace;">${dateStr}</span>
+          </button>`;
+        }).join('')}
+      </div>
+      <div class="modal-btns">
+        <button class="modal-btn-cancel" id="ln-et-cancel">Cancel</button>
+      </div>
+    </div>`;
+  document.body.appendChild(backdrop);
+
+  backdrop.querySelector('#ln-et-cancel').addEventListener('click', () => backdrop.remove());
+  backdrop.addEventListener('click', e => { if (e.target === backdrop) backdrop.remove(); });
+  backdrop.querySelectorAll('.ln-et-pick').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const s = sessions.find(s => s.id === btn.dataset.id);
+      backdrop.remove();
+      if (s) openPageTimesEditor(s, pid);
     });
-  } catch(e) { console.warn('Could not save bookmarks:', e); }
+  });
 }
 
 async function changeZonePage(delta) {

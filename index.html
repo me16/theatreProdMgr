@@ -896,18 +896,11 @@
     .rs-end-run-btn:hover { background:#e63946; color:#fff; }
 
     /* Run Show — timer panel */
-    .rs-timer-panel { background:var(--bg-raised); border-radius:8px; padding:14px; }
-    .rs-timer-progress { width:100%; height:6px; background:#2a2a3e; border-radius:3px; margin-bottom:8px; }
-    .rs-timer-progress-bar { height:100%; background:#d4af37; border-radius:3px; width:0%; transition:width 0.5s; }
-    .rs-timer-display { display:flex; gap:10px; font-size:11px; color:#888; font-family:'DM Mono',monospace; flex-wrap:wrap; margin-bottom:10px; }
-    .rs-timer-btns { display:flex; gap:6px; margin-bottom:8px; }
-    .rs-timer-page { font-family:'DM Mono',monospace; font-size:12px; color:var(--text-muted); }
-
-    /* Run Show — timer preview (idle) */
-    .rs-timer-preview { display:flex; flex-direction:column; gap:6px; }
-    .rs-timer-field { display:flex; justify-content:space-between; align-items:center; font-size:12px; }
-    .rs-timer-field label { color:var(--text-muted); }
-    .rs-timer-field span { font-family:'DM Mono',monospace; color:var(--text-secondary); }
+    .rs-timer-panel { background:var(--bg-raised); border-radius:8px; padding:12px 14px; }
+    .rs-hold-btn { background:var(--bg-card); border:1px solid var(--bg-border); color:var(--text-secondary); padding:5px 12px; border-radius:4px; font-size:12px; font-weight:500; cursor:pointer; transition:all 0.2s; }
+    .rs-hold-btn:hover { border-color:var(--gold); color:var(--gold); }
+    .rs-hold-btn--active { background:var(--state-hold); border-color:var(--state-hold); color:#0a0a14; }
+    .rs-hold-btn--active:hover { opacity:0.85; }
 
     /* Run Show — tracking widget (P6) */
     .rs-tracking-widget { border-radius:8px; overflow:hidden; border:1px solid var(--bg-border); }
@@ -1603,6 +1596,7 @@
       <button class="ln-header-btn" id="ln-split-btn">2-up</button>
       <button class="ln-header-btn ln-header-btn--active" id="ln-view-zones-btn">Zones</button>
       <button class="ln-header-btn" id="ln-place-cue-btn" title="Click a spot on the page to place a script cue">Place Cue</button>
+      <button class="ln-header-btn" id="ln-edit-times-btn" title="Edit page arrival times for a run report" style="display:none;">Edit Times</button>
       <button class="ln-header-btn" id="ln-bookmark-btn" title="Bookmark this page">☆</button>
     </div>
 

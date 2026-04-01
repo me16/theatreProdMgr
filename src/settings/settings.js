@@ -119,10 +119,12 @@ export async function renderSettingsTab() {
     container.querySelector('#settings-regen-code')?.addEventListener('click', async () => {
       if (!confirmDialog('Regenerate join code? The old code will stop working.')) return;
       const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-      let code = '';
-      for (let i = 0; i < 7; i++) code += chars[Math.floor(Math.random() * chars.length)];
+      const bytes = new Uint8Array(7);
+      crypto.getRandomValues(bytes);
+      const code = Array.from(bytes, b => chars[b % chars.length]).join('');
+      const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
       try {
-        await updateDoc(doc(db, 'productions', prod.id), { joinCode: code });
+        await updateDoc(doc(db, 'productions', prod.id), { joinCode: code, joinCodeExpiresAt: expiresAt });
         state.activeProduction.joinCode = code;
         container.querySelector('#settings-join-code').textContent = code;
         toast('Join code regenerated.', 'success');
@@ -319,6 +321,7 @@ async function loadSettingsMembers() {
     const snap = await getDocs(collection(db, 'productions', pid, 'members'));
     const members = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     if (members.length === 0) { container.innerHTML = '<div style="color:var(--text-muted)">No members.</div>'; return; }
+    const ownerCount = members.filter(m => m.role === 'owner').length;
     container.innerHTML = members.map(m => `
       <div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--bg-border);">
         <div style="flex:1">
@@ -343,6 +346,7 @@ async function loadSettingsMembers() {
     );
     container.querySelectorAll('[data-action="demote"]').forEach(btn =>
       btn.addEventListener('click', async () => {
+        if (ownerCount <= 1) { toast('Cannot demote the only owner.', 'error'); return; }
         if (!confirmDialog(`Demote ${btn.dataset.name} to member?`)) return;
         try {
           await updateDoc(doc(db, 'productions', pid, 'members', btn.dataset.id), { role: 'member' });
@@ -352,6 +356,8 @@ async function loadSettingsMembers() {
     );
     container.querySelectorAll('[data-action="remove"]').forEach(btn =>
       btn.addEventListener('click', async () => {
+        const target = members.find(m => m.id === btn.dataset.id);
+        if (target?.role === 'owner' && ownerCount <= 1) { toast('Cannot remove the only owner.', 'error'); return; }
         if (!confirmDialog(`Remove ${btn.dataset.name} from this production?`)) return;
         try {
           await deleteDoc(doc(db, 'productions', pid, 'members', btn.dataset.id));

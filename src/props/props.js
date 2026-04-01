@@ -752,6 +752,12 @@ export async function startRunSession(sessionTitle, totalPages) {
     currentPage: 1,
     holdLog: [],
     scratchpad: '',
+    startedAt: Date.now(),
+    isOnHold: false,
+    holdStartTime: null,
+    isRecording: false,
+    pageLog: [],
+    autoPlay: null,
   };
 
   // P0: Start periodic Firestore sync
@@ -768,8 +774,17 @@ export async function endRunSession(scratchpadText) {
   // Capture session data BEFORE clearing state
   const sid = state.runSession.sessionId;
   const pid = state.activeProduction.id;
-  const holdLog = state.runSession.holdLog || [];
+  const startedAt = state.runSession.startedAt || Date.now();
+  const pageLog = [...(state.runSession.pageLog || [])];
+
+  // Close any open hold before computing totals
+  const holdLog = [...(state.runSession.holdLog || [])];
+  if (state.runSession.isOnHold && state.runSession.holdStartTime) {
+    const holdDur = (Date.now() - state.runSession.holdStartTime) / 1000;
+    holdLog.push({ startedAt: state.runSession.holdStartTime, endedAt: Date.now(), durationSeconds: holdDur });
+  }
   const totalHold = holdLog.reduce((s, h) => s + (h.durationSeconds || 0), 0);
+  const durationSeconds = Math.max(0, (Date.now() - startedAt) / 1000 - totalHold);
 
   // P0: Stop sync FIRST (before clearing session)
   stopSessionSync();
@@ -787,13 +802,16 @@ export async function endRunSession(scratchpadText) {
 
   // Now write the final state to Firestore
   // Security rule note: sessions update restricted to creator (createdBy == uid) or owner role
-  await updateDoc(doc(db, 'productions', pid, 'sessions', sid), {
+  const update = {
     endedAt: serverTimestamp(),
-    holdLog: holdLog,
+    holdLog,
     totalHoldSeconds: totalHold,
+    durationSeconds,
     scratchpadNotes: scratchpadText || '',
     status: 'ended',
-  });
+  };
+  if (pageLog.length > 0) update.pageLog = pageLog;
+  await updateDoc(doc(db, 'productions', pid, 'sessions', sid), update);
 }
 
 /* ======================== PROP NOTES MODAL ======================== */

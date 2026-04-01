@@ -192,9 +192,9 @@ function openCreateModal() {
 
 function generateJoinCode() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no confusable: 0/O, 1/I
-  let code = '';
-  for (let i = 0; i < 7; i++) code += chars[Math.floor(Math.random() * chars.length)];
-  return code;
+  const bytes = new Uint8Array(7);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, b => chars[b % chars.length]).join('');
 }
 
 async function doCreate(backdrop) {
@@ -214,6 +214,7 @@ async function doCreate(backdrop) {
   try {
     const uid = state.currentUser.uid;
     const joinCode = generateJoinCode();
+    const joinCodeExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 
     // Create production doc
     const prodRef = await addDoc(collection(db, 'productions'), {
@@ -222,6 +223,7 @@ async function doCreate(backdrop) {
       createdAt: serverTimestamp(),
       joinCode,
       joinCodeActive: true,
+      joinCodeExpiresAt,
       scriptPath: null,
       scriptPageCount: null,
     });

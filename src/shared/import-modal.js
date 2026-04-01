@@ -54,7 +54,7 @@ export function showImportModal({ type, schemaHtml, exampleJson, claudePrompt, o
         <p style="font-size:12px;color:var(--text-secondary);line-height:1.5;margin-bottom:10px;">
           Have a spreadsheet or PDF with your ${typeName.toLowerCase()} data? Upload it to
           <a href="https://claude.ai" target="_blank" style="color:#5B9BD4;text-decoration:underline;">claude.ai</a>
-          alongside the prompt below, and Claude will convert it to the exact JSON format needed.
+          alongside the prompt below, and Claude will convert it to the exact JSON format needed. Just hit DOWNLOAD when the artifact is generated, and import the downloaded file.
         </p>
         <div style="position:relative;">
           <pre id="import-modal-prompt" style="background:var(--bg-deep);border:1px solid var(--bg-border);border-radius:8px;padding:14px 16px;font-family:'DM Mono',monospace;font-size:11px;color:var(--text-secondary);overflow-x:auto;white-space:pre-wrap;word-break:break-word;max-height:160px;overflow-y:auto;margin:0;">${escapeForPre(claudePrompt)}</pre>

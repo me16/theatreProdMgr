@@ -993,7 +993,7 @@ function importPropsJSON() {
         ]
       }
     ], null, 2),
-    claudePrompt: `I have a props tracking spreadsheet/document for a theater production. Please convert it to a JSON array with this exact format:
+    claudePrompt: `/artifact I have a props tracking spreadsheet/document for a theater production. Please convert it to a JSON array with this exact format:
 
 [
   {

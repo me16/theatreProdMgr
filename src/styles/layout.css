@@ -1,0 +1,47 @@
+/* src/styles/layout.css */
+#app-view {
+  background: var(--bg-base); position: fixed; inset: 0;
+  display: none; flex-direction: column; z-index: var(--z-overlay);
+}
+
+/* Single unified navigation bar (56px) */
+.app-topbar {
+  display: flex; align-items: center;
+  height: 56px; padding: 0 var(--space-4); gap: var(--space-3);
+  background: var(--bg-base); border-bottom: 1px solid var(--bg-border);
+  flex-shrink: 0; z-index: var(--z-header);
+}
+.app-topbar-logo {
+  font-family: 'Instrument Serif', serif; font-size: 20px;
+  color: var(--gold); letter-spacing: 3px; cursor: pointer;
+  padding-right: var(--space-4); border-right: 1px solid var(--bg-border);
+  flex-shrink: 0;
+}
+.app-topbar-logo:hover { opacity: 0.75; }
+.app-topbar-title {
+  font-size: 13px; color: var(--text-secondary);
+  max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.app-topbar-tabs {
+  display: flex; align-items: center; gap: 2px;
+  margin-left: auto;
+}
+.app-tab {
+  height: 36px; padding: 0 var(--space-4);
+  background: none; border: none; border-radius: var(--radius-sm);
+  color: var(--text-muted); font-size: 13px; font-weight: 500;
+  cursor: pointer; transition: all 0.15s;
+}
+.app-tab:hover     { color: var(--text-secondary); background: var(--bg-raised); }
+.app-tab--active   { color: var(--gold); background: var(--gold-subtle); }
+
+.app-tab-content { flex: 1; overflow: hidden; position: relative; display: flex; flex-direction: column; }
+.tab-panel { display: none; flex: 1; overflow: hidden; flex-direction: column; }
+.tab-panel--active { display: flex; }
+
+.topbar-btn {
+  background: none; border: 1px solid var(--bg-border);
+  color: var(--text-muted); font-size: 12px; padding: 5px 12px;
+  border-radius: var(--radius-sm); cursor: pointer; transition: all 0.2s;
+}
+.topbar-btn:hover { border-color: var(--gold); color: var(--gold); }

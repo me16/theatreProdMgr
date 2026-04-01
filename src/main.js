@@ -1,3 +1,13 @@
+import './styles/tokens.css'
+import './styles/base.css'
+import './styles/components.css'
+import './styles/layout.css'
+import './styles/dashboard.css'
+import './styles/tracking.css'
+import './styles/runshow.css'
+import './styles/cast.css'
+import './styles/settings.css'
+import './styles/linenotes.css'
 import { auth, db } from './firebase.js';
 import { onAuthStateChanged, getIdTokenResult } from 'firebase/auth';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';

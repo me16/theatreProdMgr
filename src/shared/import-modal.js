@@ -29,7 +29,7 @@ export function showImportModal({ type, schemaHtml, exampleJson, claudePrompt, o
   const modal = document.createElement('div');
   modal.id = MODAL_ID;
   modal.className = 'modal-backdrop';
-  modal.style.cssText = 'display:flex;align-items:center;justify-content:center;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.7);';
+  modal.style.cssText = 'display:flex;align-items:center;justify-content:center;position:fixed;inset:0;z-index:var(--z-modal);background:rgba(0,0,0,0.7);';
 
   modal.innerHTML = `
     <div style="background:var(--bg-raised);border:1px solid var(--bg-border);border-radius:12px;max-width:640px;width:90vw;max-height:85vh;overflow-y:auto;padding:28px 32px;">

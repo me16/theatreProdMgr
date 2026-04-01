@@ -80,7 +80,7 @@ export function renderMarginCues(cues, page, half, overlayEl, canvasWidth, onCue
       'font-size:10px',
       'font-weight:500',
       'cursor:pointer',
-      'z-index:var(--z-popover)',
+      'z-index:15',
       'pointer-events:all',
       'transition:transform 0.15s,box-shadow 0.15s',
       'background:' + bg,

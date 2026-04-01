@@ -69,7 +69,7 @@ export function showRecoveryDialog(sessionData) {
   return new Promise(resolve => {
     const title = sessionData.title || 'Untitled Session';
     const bd = document.createElement('div');
-    bd.style.cssText = 'position:fixed;inset:0;z-index:var(--z-modal);background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;';
+    bd.style.cssText = 'position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;';
     bd.innerHTML = `<div style="background:var(--bg-card);border:1px solid var(--bg-border);border-radius:12px;padding:24px;width:420px;max-width:90vw;text-align:center;box-shadow:0 24px 80px rgba(0,0,0,0.5);">
       <div style="font-size:32px;margin-bottom:12px;">⚠️</div>
       <h2 style="font-size:18px;color:var(--text-primary);margin-bottom:8px;">Session Interrupted</h2>

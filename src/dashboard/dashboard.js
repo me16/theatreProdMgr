@@ -105,7 +105,7 @@ async function renderProductionCards(memberSnaps) {
       const memberCount = membersSnap.size;
 
       const card = document.createElement('div');
-      card.className = 'production-card' + (role === 'owner' ? ' production-card--owner' : '');
+      card.className = 'production-card';
       card.innerHTML = `
         <h3>${escapeHtml(prod.title)}</h3>
         <span class="role-badge role-badge--${role}">${escapeHtml(role)}</span>

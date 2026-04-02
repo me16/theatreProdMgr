@@ -9,16 +9,15 @@
  */
 
 import { onPropsTabActivated } from '../props/props.js';
-import { subscribeToActorCues, renderActorsContent, setActorInnerTab, getActorInnerTab } from './actors.js';
-import { subscribeToScenic, renderScenicContent, setScenicInnerTab, getScenicInnerTab } from './scenic.js';
-import { subscribeToCostumes, renderCostumesContent, setCostumeInnerTab, getCostumeInnerTab } from './costumes.js';
+import { subscribeToActorCues, renderActorsContent } from './actors.js';
+import { subscribeToCostumes, renderCostumesContent } from './costumes.js';
 import { state } from '../shared/state.js';
 import { isOwner } from '../shared/roles.js';
 
 let activeTrackingType = 'props';
 
 // Per-type scroll positions, preserved across tab switches
-const _scrollPositions = { props: 0, actors: 0, scenic: 0, costumes: 0 };
+const _scrollPositions = { props: 0, actors: 0, costumes: 0 };
 
 /**
  * Called by tabs.js when the Tracking tab is activated.
@@ -74,11 +73,6 @@ function _activateTrackingType(type) {
       if (propsSubtabs) propsSubtabs.style.display = 'none';
       if (propsContent) { propsContent.style.display = ''; renderActorsContent(propsContent); }
       break;
-    case 'scenic':
-      _ensureTrackingSubs();
-      if (propsSubtabs) propsSubtabs.style.display = 'none';
-      if (propsContent) { propsContent.style.display = ''; renderScenicContent(propsContent); }
-      break;
     case 'costumes':
       _ensureTrackingSubs();
       if (propsSubtabs) propsSubtabs.style.display = 'none';
@@ -99,7 +93,6 @@ function _ensureTrackingSubs() {
   if (!pid) return;
   _trackingSubbed = true;
   subscribeToActorCues(pid);
-  subscribeToScenic(pid);
   subscribeToCostumes(pid);
 }
 

@@ -234,6 +234,7 @@ function subscribeToProps() {
 
 function renderContent() {
   if (!document.getElementById('tab-tracking')?.classList.contains('tab-panel--active')) return;
+  if (document.querySelector('.tracking-type-tab--active')?.dataset.trackType !== 'props') return;
   // Skip manage tab re-render if user is actively editing a prop (prevents input loss)
   if (activeTab === 'manage' && editingPropId) return;
   switch (activeTab) {

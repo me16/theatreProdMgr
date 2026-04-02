@@ -159,7 +159,7 @@ function _renderActorsView(page, warnPages) {
     const r = getItemStatus(a, page, { stateModel: 'three-state' });
     const warn = r.upcomingHold && (r.upcomingHold - page) <= warnPages && (r.upcomingHold - page) > 0;
     const holdResolved = r.holdLocation ? resolveLocation(r.holdLocation, locs) : null;
-    const item = { name: a.characterName || '?', color: a.color || '#5B9BD4', holdShortName: holdResolved?.shortName || null, warn, ...r };
+    const item = { ...r, name: a.characterName || '?', color: a.color || '#5B9BD4', holdShortName: holdResolved?.shortName || null, warn };
     if (r.status === 'ON') on.push(item);
     else if (r.status === 'HOLD') hold.push(item);
     else off.push(item);
@@ -190,7 +190,7 @@ function _renderActorsView(page, warnPages) {
 function _renderCostumesView(page, warnPages) {
   const all = getCostumes();
   if (!all.length) {
-    return '<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:12px;">Loading\u2026</div>';
+    return '<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:12px;">No costumes tracked.</div>';
   }
   const quickChanges = [];
   const wearing = [];

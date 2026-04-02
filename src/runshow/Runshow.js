@@ -2044,7 +2044,7 @@ function _expandNoteIntoByCastId(n, byCastId, cast) {
 
 /** Build a formatted email body for one actor's line notes. */
 function _buildActorEmailBody(actorName, notes, show, dateStr) {
-  const NOTE_TYPE_LABELS = { skp: 'SKIP', para: 'PARAPHRASE', line: 'LINE', add: 'ADDITION', gen: 'GENERAL' };
+  const NOTE_TYPE_LABELS = { skp: 'SKIP', para: 'PARAPHRASE', line: 'CALLED', add: 'ADDITION', gen: 'GENERAL', jmp: 'JUMPED', mw: 'MISSED WORDS' };
   const sorted = [...notes].sort((a, b) =>
     a.page !== b.page ? a.page - b.page : (a.bounds?.y || 0) - (b.bounds?.y || 0)
   );

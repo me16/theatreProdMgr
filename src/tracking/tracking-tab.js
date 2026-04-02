@@ -1,7 +1,7 @@
 /**
  * tracking-tab.js — Tracking Tab Controller
  *
- * Manages the outer tracking-type subtabs (Props | Actors | Scenic | Costumes)
+ * Manages the outer tracking-type subtabs (Props | Actors | Costumes)
  * and delegates rendering to the active tracking type's module.
  *
  * The inner subtabs (Manage | View Show | Pre/Post Check) are owned by each

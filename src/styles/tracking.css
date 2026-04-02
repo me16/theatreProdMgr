@@ -25,7 +25,6 @@
 .tracking-type-tab--active { color: var(--gold); background: var(--bg-raised); border-color: var(--bg-border); }
 .tracking-type-tab--active[data-track-type="props"] { color: var(--track-prop); }
 .tracking-type-tab--active[data-track-type="actors"] { color: var(--track-actor); }
-.tracking-type-tab--active[data-track-type="scenic"] { color: var(--track-scenic); }
 .tracking-type-tab--active[data-track-type="costumes"] { color: var(--track-costume); }
 .tracking-type-tab .tracking-badge {
   position: absolute; top: 2px; right: 2px; width: 14px; height: 14px;

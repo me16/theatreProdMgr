@@ -1,0 +1,72 @@
+/* src/styles/tokens.css */
+:root {
+  /* GOLD */
+  --gold-dim:    #9A7A3C;
+  --gold:        #C8A050;
+  --gold-light:  #DCBE6A;
+  --gold-subtle: rgba(200,160,80,0.12);
+  --gold-glow:   rgba(200,160,80,0.18);
+
+  /* BACKGROUNDS */
+  --bg-deep:   #0B0B14;
+  --bg-base:   #111120;
+  --bg-card:   #171728;
+  --bg-raised: #1E1E32;
+  --bg-border: #2A2A42;
+  --bg-hover:  #222236;
+
+  /* TEXT */
+  --text-primary:   #E8E8F0;
+  --text-secondary: #9898B0;
+  --text-muted:     #5C5C72;
+
+  /* SEMANTIC */
+  --red:   #E04050;
+  --green: #38A060;
+  --blue:  #5B9BD4;
+
+  /* TRACKING TYPE */
+  --track-prop:    #C8A96E;
+  --track-actor:   #5B9BD4;
+  --track-scenic:  #6B8F4E;
+  --track-costume: #9B7BC8;
+
+  /* TRACKING STATE */
+  --state-hold: #D4AF37;
+  --state-on:   #4CAF50;
+  --state-off:  #555555;
+  --qc-alert:   #E89B3E;
+
+  /* SPACING */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* BORDER RADIUS */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  /* SHADOWS */
+  --shadow-sm: 0 2px 8px rgba(0,0,0,0.3);
+  --shadow-md: 0 8px 24px rgba(0,0,0,0.4);
+  --shadow-lg: 0 24px 80px rgba(0,0,0,0.5);
+
+  /* Z-INDEX SCALE */
+  --z-base:    1;
+  --z-sticky:  10;
+  --z-overlay: 50;
+  --z-header:  60;
+  --z-popover: 100;
+  --z-modal:   300;
+  --z-toast:   9999;
+  --z-login:   10000;
+
+  /* WIDGET LAYOUT */
+  --widget-tab-height: 30px;
+}

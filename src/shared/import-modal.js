@@ -29,7 +29,7 @@ export function showImportModal({ type, schemaHtml, exampleJson, claudePrompt, o
   const modal = document.createElement('div');
   modal.id = MODAL_ID;
   modal.className = 'modal-backdrop';
-  modal.style.cssText = 'display:flex;align-items:center;justify-content:center;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.7);';
+  modal.style.cssText = 'display:flex;align-items:center;justify-content:center;position:fixed;inset:0;z-index:var(--z-modal);background:rgba(0,0,0,0.7);';
 
   modal.innerHTML = `
     <div style="background:var(--bg-raised);border:1px solid var(--bg-border);border-radius:12px;max-width:640px;width:90vw;max-height:85vh;overflow-y:auto;padding:28px 32px;">
@@ -54,7 +54,7 @@ export function showImportModal({ type, schemaHtml, exampleJson, claudePrompt, o
         <p style="font-size:12px;color:var(--text-secondary);line-height:1.5;margin-bottom:10px;">
           Have a spreadsheet or PDF with your ${typeName.toLowerCase()} data? Upload it to
           <a href="https://claude.ai" target="_blank" style="color:#5B9BD4;text-decoration:underline;">claude.ai</a>
-          alongside the prompt below, and Claude will convert it to the exact JSON format needed. Just hit DOWNLOAD when the artifact is generated, and import the downloaded file.
+          alongside the prompt below, and Claude will convert it to the exact JSON format needed.
         </p>
         <div style="position:relative;">
           <pre id="import-modal-prompt" style="background:var(--bg-deep);border:1px solid var(--bg-border);border-radius:8px;padding:14px 16px;font-family:'DM Mono',monospace;font-size:11px;color:var(--text-secondary);overflow-x:auto;white-space:pre-wrap;word-break:break-word;max-height:160px;overflow-y:auto;margin:0;">${escapeForPre(claudePrompt)}</pre>

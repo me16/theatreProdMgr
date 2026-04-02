@@ -88,16 +88,20 @@ let rsBookmarks = [];
 const NOTE_TYPES_MAP = {
   'skp': 'Skipped',
   'para': 'Paraphrase',
-  'line': 'Called line',
+  'line': 'Called',
   'add': 'Added words',
   'gen': 'General',
+  'jmp': 'Jumped',
+  'mw': 'Missed words',
 };
 const NOTE_TYPES = [
-  { key: 'skp', label: 'Skip', color: '#e63946' },
-  { key: 'para', label: 'Para', color: '#e89b3e' },
-  { key: 'line', label: 'Line', color: '#5b9bd4' },
-  { key: 'add', label: 'Add', color: '#6b8f4e' },
-  { key: 'gen', label: 'Gen', color: '#9b7bc8' },
+  { key: 'skp',  label: 'Skip',   color: '#e63946' },
+  { key: 'para', label: 'Para',   color: '#e89b3e' },
+  { key: 'line', label: 'Called', color: '#5b9bd4' },
+  { key: 'add',  label: 'Add',    color: '#6b8f4e' },
+  { key: 'gen',  label: 'Gen',    color: '#9b7bc8' },
+  { key: 'jmp',  label: 'Jumped', color: '#c77dff' },
+  { key: 'mw',   label: 'Missed', color: '#2ec4b6' },
 ];
 
 /* ═══════════════════════════════════════════════════════════
@@ -701,7 +705,7 @@ function renderRunShowSidebar() {
 
   const typesEl = document.getElementById('rs-note-types');
   if (typesEl) {
-    typesEl.innerHTML = NOTE_TYPES.map(t => `<button class="note-type-btn ${rsActiveNoteType === t.key ? 'note-type-btn--active' : ''}" data-type="${t.key}">${t.key}</button>`).join('');
+    typesEl.innerHTML = NOTE_TYPES.map(t => `<button class="note-type-btn ${rsActiveNoteType === t.key ? 'note-type-btn--active' : ''}" data-type="${t.key}">${t.label}</button>`).join('');
     typesEl.querySelectorAll('.note-type-btn').forEach(btn => btn.addEventListener('click', () => { rsActiveNoteType = btn.dataset.type; renderRunShowSidebar(); }));
   }
 
@@ -1539,7 +1543,7 @@ function rsBuildPopover(selCharId, selType, lineText) {
   });
 
   const defType = selType || rsActiveNoteType;
-  const TYPE_KEYS = { skp: 'S', para: 'P', line: 'L', add: 'A', gen: 'G' };
+  const TYPE_KEYS = { skp: 'S', para: 'P', line: 'L', add: 'A', gen: 'G', jmp: 'J', mw: 'M' };
   Object.entries(NOTE_TYPES_MAP).forEach(([key, label]) => {
     const btn = document.createElement('button');
     btn.className = 'popover-type' + (key === defType ? ' popover-type--active' : '');
@@ -1823,7 +1827,7 @@ async function rsHandleKeydown(e) {
       document.getElementById('rs-pop-chars')?.querySelectorAll('.popover-char').forEach((el, i) => el.classList.toggle('popover-char--active', rsActiveCharIdxs.has(i)));
       return;
     }
-    const typeKeys = { 's': 'skp', 'p': 'para', 'l': 'line', 'a': 'add', 'g': 'gen' };
+    const typeKeys = { 's': 'skp', 'p': 'para', 'l': 'line', 'a': 'add', 'g': 'gen', 'j': 'jmp', 'm': 'mw' };
     if (typeKeys[e.key.toLowerCase()]) {
       rsActiveNoteType = typeKeys[e.key.toLowerCase()];
       document.getElementById('rs-pop-types')?.querySelectorAll('.popover-type').forEach(el => el.classList.toggle('popover-type--active', el.dataset.type === rsActiveNoteType));
@@ -1932,7 +1936,7 @@ function openFabPopover() {
 
   const typesEl = document.getElementById('rnp-types');
   if (typesEl) {
-    const TYPE_KEYS = { skp: 'S', para: 'P', line: 'L', add: 'A', gen: 'G' };
+    const TYPE_KEYS = { skp: 'S', para: 'P', line: 'L', add: 'A', gen: 'G', jmp: 'J', mw: 'M' };
     typesEl.innerHTML = Object.entries(NOTE_TYPES_MAP).map(([key]) => `
       <button class="popover-type ${key === fabSelectedType ? 'popover-type--active' : ''}" data-type="${key}">
         <span>${key}</span><span class="type-key">${TYPE_KEYS[key]}</span>

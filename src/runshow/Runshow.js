@@ -28,9 +28,9 @@ import {
   getPropStatus, getProps,
   startRunSession, endRunSession,
 } from '../props/props.js';
-import { detectActiveSession, showRecoveryDialog, hydrateSessionFromFirestore, abandonSession, startSessionSync, syncSessionToFirestore } from '../shared/session-sync.js';
+import { detectActiveSession, showRecoveryDialog, hydrateSessionFromFirestore, abandonSession, startSessionSync, syncSessionToFirestore, registerUnloadSync } from '../shared/session-sync.js';
 import { renderMarginCues, renderCueDetailPanel, renderCueSummaryPanel } from './cue-margin.js';
-import { renderTrackingWidget } from '../tracking/stage-widget.js';
+import { renderTrackingWidget, refreshWidgetContent, refreshWidgetBadges } from '../tracking/stage-widget.js';
 // Zone extraction is self-contained in runshow.js — no linenotes imports needed for rendering
 // Script page label helpers are defined locally below (rsScriptLabel / rsScriptOffset).
 
@@ -468,6 +468,48 @@ export function initRunShow() {
     });
     rsPageInput.addEventListener('keydown', e => { if (e.key === 'Enter') rsPageInput.blur(); });
   }
+  registerUnloadSync();
+}
+
+async function rsCheckForActiveSession() {
+  const pid = state.activeProduction?.id;
+  if (!pid) return;
+  const activeSession = await detectActiveSession(pid);
+  if (!activeSession) return;
+
+  const choice = await showRecoveryDialog(activeSession);
+
+  if (choice === 'resume') {
+    hydrateSessionFromFirestore(activeSession);
+    startSessionSync();
+    rsLastSessionId = activeSession.id;
+    rsNotes = [];
+    rsSubscribeToNotes();
+    const fab = document.getElementById('run-show-fab');
+    if (fab) fab.classList.remove('hidden');
+    renderRunShowControls();
+    rsStartClock();
+    toast('Session resumed.', 'success');
+
+  } else if (choice === 'generate') {
+    const sid = activeSession.id;
+    hydrateSessionFromFirestore(activeSession);
+    rsLastSessionId = sid;
+    try {
+      await endRunSession(activeSession.liveScratchpad || '');
+      renderRunShowControls();
+      await generateRunReport(sid);
+      loadReportsHistory();
+      toast('Run report generated.', 'success');
+    } catch (e) {
+      console.error('Generate report error:', e);
+      toast('Failed to generate report.', 'error');
+    }
+
+  } else { // 'discard'
+    await abandonSession(pid, activeSession.id);
+    toast('Session discarded.', 'info');
+  }
 }
 
 export async function onRunShowTabActivated() {
@@ -495,7 +537,12 @@ export async function onRunShowTabActivated() {
   renderRunShowTab();
   rsLoadBookmarks();
   rsUpdateBookmarksBtn();
-  if (state.runSession) rsStartClock();
+  if (state.runSession) {
+    rsStartClock();
+  } else {
+    await rsCheckForActiveSession();
+    if (state.runSession) rsStartClock();
+  }
   document.getElementById('rs-canvas-area')?.focus({ preventScroll: true });
 }
 
@@ -1161,6 +1208,13 @@ async function rsRenderPage(num) {
   rsRenderNoteMarkers(num, rsCurrentHalf);
   rsRenderCueBanner();      // Feature 5
   rsRenderDiagramPanel();   // Feature 4
+
+  // Refresh tracking widget (props/actors/costumes) on every page change
+  const twContainer = document.querySelector('.rs-tracking-widget');
+  if (twContainer) {
+    refreshWidgetContent(twContainer, rsCurrentScriptPage(), 5);
+    refreshWidgetBadges(twContainer, rsCurrentScriptPage(), 5);
+  }
 }
 
 async function loadOrExtractZonesLocal(page, num, viewport, zKey) {

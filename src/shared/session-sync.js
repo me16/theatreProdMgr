@@ -9,6 +9,7 @@ import { updateScriptEditorTab } from './tabs.js';
 import {
   doc, updateDoc, getDocs, query, where, collection, serverTimestamp
 } from 'firebase/firestore';
+import { escapeHtml } from './ui.js';
 
 let _syncInterval = null;
 const SYNC_INTERVAL_MS = 10_000;
@@ -68,7 +69,7 @@ export async function detectActiveSession(productionId) {
 
 export function showRecoveryDialog(sessionData) {
   return new Promise(resolve => {
-    const title = sessionData.title || 'Untitled Session';
+    const title = escapeHtml(sessionData.title || 'Untitled Session');
     const bd = document.createElement('div');
     bd.style.cssText = 'position:fixed;inset:0;z-index:var(--z-modal);background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;';
     bd.innerHTML = `<div style="background:var(--bg-card);border:1px solid var(--bg-border);border-radius:12px;padding:24px;width:460px;max-width:90vw;text-align:center;box-shadow:0 24px 80px rgba(0,0,0,0.5);">
@@ -137,6 +138,9 @@ export function registerUnloadSync() {
   if (_unloadRegistered) return;
   _unloadRegistered = true;
   window.addEventListener('pagehide', () => {
+    // Best-effort only — async Firestore writes are not guaranteed to
+    // complete before page teardown. The 10-second periodic sync is the
+    // primary durability mechanism; this is a last-ditch attempt.
     if (state.runSession) syncSessionToFirestore();
   });
 }

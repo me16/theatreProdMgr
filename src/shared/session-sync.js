@@ -5,6 +5,7 @@
  */
 import { db } from '../firebase.js';
 import { state } from './state.js';
+import { updateScriptEditorTab } from './tabs.js';
 import {
   doc, updateDoc, getDocs, query, where, collection, serverTimestamp
 } from 'firebase/firestore';
@@ -70,20 +71,22 @@ export function showRecoveryDialog(sessionData) {
     const title = sessionData.title || 'Untitled Session';
     const bd = document.createElement('div');
     bd.style.cssText = 'position:fixed;inset:0;z-index:var(--z-modal);background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;';
-    bd.innerHTML = `<div style="background:var(--bg-card);border:1px solid var(--bg-border);border-radius:12px;padding:24px;width:420px;max-width:90vw;text-align:center;box-shadow:0 24px 80px rgba(0,0,0,0.5);">
+    bd.innerHTML = `<div style="background:var(--bg-card);border:1px solid var(--bg-border);border-radius:12px;padding:24px;width:460px;max-width:90vw;text-align:center;box-shadow:0 24px 80px rgba(0,0,0,0.5);">
       <div style="font-size:32px;margin-bottom:12px;">⚠️</div>
       <h2 style="font-size:18px;color:var(--text-primary);margin-bottom:8px;">Session Interrupted</h2>
       <p style="font-size:14px;color:var(--text-secondary);margin-bottom:20px;line-height:1.5;">
-        You have an active session <strong>"${title}"</strong> that was interrupted.<br/>Resume or discard?
+        You have an active session <strong>"${title}"</strong> that was interrupted.<br/>What would you like to do?
       </p>
-      <div style="display:flex;gap:10px;justify-content:center;">
+      <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">
         <button id="_rec_discard" style="padding:8px 20px;background:none;border:1px solid var(--bg-border);color:var(--text-secondary);border-radius:6px;font-size:13px;cursor:pointer;">Discard</button>
+        <button id="_rec_generate" style="padding:8px 20px;background:none;border:1px solid var(--gold);color:var(--gold);border-radius:6px;font-size:13px;cursor:pointer;">Generate Report</button>
         <button id="_rec_resume" style="padding:8px 20px;background:var(--gold);border:none;color:var(--bg-deep);border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">Resume Session</button>
       </div>
     </div>`;
     document.body.appendChild(bd);
-    bd.querySelector('#_rec_resume').onclick = () => { bd.remove(); resolve('resume'); };
-    bd.querySelector('#_rec_discard').onclick = () => { bd.remove(); resolve('discard'); };
+    bd.querySelector('#_rec_resume').onclick   = () => { bd.remove(); resolve('resume'); };
+    bd.querySelector('#_rec_generate').onclick = () => { bd.remove(); resolve('generate'); };
+    bd.querySelector('#_rec_discard').onclick  = () => { bd.remove(); resolve('discard'); };
     bd.addEventListener('click', e => { if (e.target === bd) { bd.remove(); resolve('discard'); } });
   });
 }
@@ -103,6 +106,7 @@ export function hydrateSessionFromFirestore(sessionData) {
     pageLog: sessionData.pageLog || [],
     autoPlay: null,
   };
+  updateScriptEditorTab();
   return state.runSession;
 }
 
@@ -126,4 +130,13 @@ function _updateHeartbeat(healthy) {
 export function hideHeartbeat() {
   const dot = document.getElementById('rs-heartbeat-dot');
   if (dot) dot.style.display = 'none';
+}
+
+let _unloadRegistered = false;
+export function registerUnloadSync() {
+  if (_unloadRegistered) return;
+  _unloadRegistered = true;
+  window.addEventListener('pagehide', () => {
+    if (state.runSession) syncSessionToFirestore();
+  });
 }

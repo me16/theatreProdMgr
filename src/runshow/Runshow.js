@@ -488,7 +488,6 @@ async function rsCheckForActiveSession() {
     const fab = document.getElementById('run-show-fab');
     if (fab) fab.classList.remove('hidden');
     renderRunShowControls();
-    rsStartClock();
     toast('Session resumed.', 'success');
 
   } else if (choice === 'generate') {
@@ -496,7 +495,8 @@ async function rsCheckForActiveSession() {
     hydrateSessionFromFirestore(activeSession);
     rsLastSessionId = sid;
     try {
-      await endRunSession(activeSession.liveScratchpad || '');
+      // scratchpad already loaded into state.runSession by hydrateSessionFromFirestore
+      await endRunSession('');
       renderRunShowControls();
       await generateRunReport(sid);
       loadReportsHistory();

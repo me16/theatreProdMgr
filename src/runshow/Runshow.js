@@ -2451,6 +2451,49 @@ function openEndRunModal() {
 }
 
 /* ═══════════════════════════════════════════════════════════
+   SESSION LIFECYCLE — RESUME ENDED SESSION
+   ═══════════════════════════════════════════════════════════ */
+async function rsResumeEndedSession(session) {
+  if (state.runSession) {
+    toast('A run session is already active.', 'error');
+    return;
+  }
+  if (!confirmDialog(`Resume "${session.title || 'this session'}"? New notes will be added to the existing session and the report will be regenerated when you end it.`)) return;
+
+  const pid = state.activeProduction.id;
+  const sid = session.id;
+
+  try {
+    // Re-activate in Firestore
+    await updateDoc(doc(db, 'productions', pid, 'sessions', sid), {
+      status: 'active',
+      endedAt: null,
+    });
+
+    // Hydrate client state
+    hydrateSessionFromFirestore(session);
+
+    // Adjust startedAt so the clock resumes from the previous elapsed time.
+    // durationSeconds is net of holds, so: startedAt = now - durationSeconds*1000 - totalHoldMs
+    const previousHoldMs = (session.holdLog || []).reduce((s, h) => s + (h.durationSeconds || 0) * 1000, 0);
+    state.runSession.startedAt = Date.now() - (session.durationSeconds || 0) * 1000 - previousHoldMs;
+
+    startSessionSync();
+    rsLastSessionId = sid;
+    rsNotes = [];
+    rsSubscribeToNotes();
+    const fab = document.getElementById('run-show-fab');
+    if (fab) fab.classList.remove('hidden');
+    renderRunShowControls();
+    rsStartClock();
+    toast('Session resumed.', 'success');
+  } catch (e) {
+    console.error('Resume session error:', e);
+    toast('Failed to resume session.', 'error');
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
    POST-RUN REPORT
    ═══════════════════════════════════════════════════════════ */
 async function generateRunReport(sessionId) {
@@ -2911,6 +2954,7 @@ async function loadReportsHistory() {
             </div>
             <button class="settings-btn" data-id="${escapeHtml(s.id)}">View</button>
             ${owner && s.pageLog?.length > 0 ? `<button class="settings-btn rs-edit-times" data-id="${escapeHtml(s.id)}">Edit Times</button>` : ''}
+            ${(s.createdBy === state.currentUser?.uid || owner) ? `<button class="settings-btn rs-resume-session" data-id="${escapeHtml(s.id)}">Resume</button>` : ''}
             ${owner ? `<button class="settings-btn settings-btn--danger rs-delete-report" data-id="${escapeHtml(s.id)}">Delete</button>` : ''}
           </div>`;
         }).join('')}
@@ -2920,6 +2964,7 @@ async function loadReportsHistory() {
       row.addEventListener('click', async e => {
         if (e.target.classList.contains('rs-delete-report')) return;
         if (e.target.classList.contains('rs-edit-times')) return;
+        if (e.target.classList.contains('rs-resume-session')) return;
         const sid = row.dataset.id;
         const session = sessions.find(s => s.id === sid);
         if (!session) return;
@@ -2955,6 +3000,16 @@ async function loadReportsHistory() {
         });
       });
     }
+
+    container.querySelectorAll('.rs-resume-session').forEach(btn => {
+      btn.addEventListener('click', async e => {
+        e.stopPropagation();
+        const sid = btn.dataset.id;
+        const session = sessions.find(s => s.id === sid);
+        if (!session) return;
+        await rsResumeEndedSession(session);
+      });
+    });
   } catch(e) {
     container.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px 0;">Could not load reports.</div>';
   }

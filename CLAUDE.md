@@ -35,23 +35,24 @@ Vanilla ES modules (no framework). State is a shared singleton; real-time reacti
 
 ### Entry point & app shell
 
-`index.html` contains all CSS (CSS variables-based design system) and the minimal DOM shell. The JS entry is `src/main.js`, which initializes feature modules and manages the auth/session lifecycle.
+`index.html` contains the minimal DOM shell. CSS lives in `src/styles/` (tokens, base, components, layout, per-feature files) and is imported by `src/main.js`. The JS entry is `src/main.js`, which initializes feature modules and manages the auth/session lifecycle.
 
 `src/firebase.js` exports `auth`, `db`, `storage`, and `functions` — all modules import from here.
 
 ### Routing & state
 
 - `src/shared/router.js` — hash router; URL pattern is `#/{prodId}/{tab}?params`
-- `src/shared/state.js` — global singleton: `currentUser`, `activeProduction`, `activeRole`, `runSession`, etc.
+- `src/shared/state.js` — global singleton: `currentUser`, `isSuperAdmin`, `activeProduction`, `activeRole`, `runSession`, etc.
 - `src/shared/tabs.js` — maps tab names to module init functions
 
 ### Major feature modules
 
 | Module | Key file(s) | Purpose |
 |--------|-------------|---------|
-| **Runshow** | `src/runshow/Runshow.js` (~2000 lines) | Core run session: PDF rendering, timer, stage columns widget, cue margin panel, session recovery |
+| **Auth** | `src/auth/login.js` | Login UI and auth flow |
+| **Runshow** | `src/runshow/Runshow.js` (~2960 lines), `src/runshow/cue-margin.js` | Core run session: PDF rendering, timer, stage columns widget, session recovery; cue-margin renders margin-pinned cue pill markers |
 | **Props** | `src/props/props.js` | Props tracking with cues, photos, pre/post-run checklists, timer |
-| **Tracking** | `src/tracking/` | Multi-type tracking (props/actors/scenic/costumes) + locations config |
+| **Tracking** | `src/tracking/` | Multi-type tracking (props/actors/costumes) + locations config |
 | **Linenotes** | `src/linenotes/linenotes.js` | PDF zone editor for tagging character names/stage directions; script cues |
 | **Cast** | `src/cast/cast.js` | Cast & crew management; character assignments used by other modules |
 | **Settings** | `src/settings/settings.js` | Production title, join code, locations CRUD |
@@ -59,12 +60,30 @@ Vanilla ES modules (no framework). State is a shared singleton; real-time reacti
 
 ### Tracking system
 
-`src/tracking/core.js` provides `getItemStatus(item, page)` — the central function that computes an item's current location and state from cue data. It handles:
-- **3-state items** (props, actors): Off → Hold → On
-- **2-state items** (scenic, costumes): Off → On
-- Legacy location alias resolution
+The tracking tab has three types: **Props** (owns its own `getPropStatus()` in `props.js`), **Actors** (`src/tracking/actors.js`), and **Costumes** (`src/tracking/costumes.js`). Scenic was removed from the UI (the Firestore collection still exists in rules for legacy data).
+
+`src/tracking/core.js` provides `getItemStatus(item, page)` — the central function for actors and costumes. It handles:
+- **3-state items** (actors): Off → Hold → On
+- **2-state items** (costumes): Off → On
+- Legacy location alias resolution (`SL`→`backstage-left`, `SR`→`backstage-right`, `ON`→`on-stage`)
+
+`src/tracking/locations.js` manages user-configurable venue locations (stored in Firestore); `DEFAULT_LOCATIONS` and `LEGACY_ALIASES` are exported constants.
+
+`src/tracking/tracking-tab.js` owns the outer Props/Actors/Costumes subtab switcher and delegates rendering to each type module.
 
 `src/tracking/stage-widget.js` renders live status badges inside the runshow cue margin, refreshed on every cue transition.
+
+### Shared utilities
+
+| File | Purpose |
+|------|---------|
+| `src/shared/modal.js` | Unified modal (3 sizes, focus trapping, Escape/backdrop close) |
+| `src/shared/toast.js` | Toast notifications |
+| `src/shared/ui.js` | `escapeHtml`, `sanitizeName`, `genId`, `confirmDialog`, `downloadCSV` |
+| `src/shared/roles.js` | `isOwner()`, `isMember()`, `canEdit*()` helpers |
+| `src/shared/stage-columns.js` | Shared stage-columns widget (extracted; used by Runshow and Props) |
+| `src/shared/import-modal.js` | Shared JSON import modal with Claude.AI prompt + file upload |
+| `src/shared/check-state.js` | Persists pre/post checklist checkbox state to `checkState/{uid}` subcollection |
 
 ### Session lifecycle & sync
 
@@ -81,10 +100,11 @@ productions/{prodId}
   members/{userId}          role: owner | member
   props/{propId}            name, cues[], location, photos[]
   actorCues/{actorId}       name, cues[], defaultHoldLocation
-  scenic/{scenicId}         2-state tracking items
+  scenic/{scenicId}         2-state items (legacy — UI removed, collection retained)
   costumes/{costumeId}      2-state tracking items
   cast/{castId}             name, type, characters[], color
   sessions/{sessionId}      run session state + timer + hold log
+  checkState/{userId}       pre/post checklist checkbox state (per user)
   lineNotes/{noteId}        per-page script notes
   scriptCues/{cueId}        page-triggered cues (type, text, diagram)
   diagrams/{diagramId}      image uploads

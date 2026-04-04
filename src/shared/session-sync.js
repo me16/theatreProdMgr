@@ -59,7 +59,11 @@ export async function detectActiveSession(productionId) {
     );
     const snap = await getDocs(q);
     if (!snap.empty) {
-      const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const RECOVERY_CUTOFF = new Date('2026-03-26T00:00:00').getTime();
+      const docs = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .filter(d => (d.startedAt || 0) >= RECOVERY_CUTOFF);
+      if (!docs.length) return null;
       docs.sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
       return docs[0];
     }

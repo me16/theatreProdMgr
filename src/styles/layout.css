@@ -34,6 +34,7 @@
 }
 .app-tab:hover     { color: var(--text-secondary); background: var(--bg-raised); }
 .app-tab--active   { color: var(--gold); background: var(--gold-subtle); }
+.app-tab--disabled { opacity: 0.35; cursor: not-allowed; pointer-events: none; }
 
 .app-tab-content { flex: 1; overflow: hidden; position: relative; display: flex; flex-direction: column; }
 .tab-panel { display: none; flex: 1; overflow: hidden; flex-direction: column; }

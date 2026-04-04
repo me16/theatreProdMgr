@@ -43,7 +43,6 @@ export function getActorInnerTab() { return activeInnerTab; }
 
 export function renderActorsContent(container) {
   if (!container) return;
-  // Inner subtab bar
   const owner = isOwner();
   const tabs = owner ? ['manage', 'view'] : ['view'];
   let html = '<div class="props-subtabs" style="display:flex;border-bottom:1px solid var(--bg-border);background:var(--bg-base);flex-shrink:0;">';
@@ -51,16 +50,18 @@ export function renderActorsContent(container) {
     const label = t === 'manage' ? 'Manage Actors' : 'View Show';
     html += '<button class="props-subtab actor-inner-tab' + (activeInnerTab === t ? ' props-subtab--active' : '') + '" data-tab="' + t + '">' + label + '</button>';
   });
-  html += '</div><div id="actors-inner-content" style="flex:1;overflow-y:auto;"></div>';
+  html += '</div>';
+
+  if (activeInnerTab === 'manage' && owner) html += _buildManageHtml();
+  else html += _buildViewHtml();
+
   container.innerHTML = html;
 
   container.querySelectorAll('.actor-inner-tab').forEach(btn => {
     btn.addEventListener('click', () => { activeInnerTab = btn.dataset.tab; renderActorsContent(container); });
   });
 
-  const inner = container.querySelector('#actors-inner-content');
-  if (activeInnerTab === 'manage' && owner) _renderManage(inner);
-  else _renderView(inner);
+  if (activeInnerTab === 'manage' && owner) _wireManageEvents(container);
 }
 
 function _locOpts(selected) {
@@ -70,11 +71,9 @@ function _locOpts(selected) {
   return locs.map(l => '<option value="' + l.id + '"' + (l.id === res ? ' selected' : '') + '>' + l.shortName + '</option>').join('');
 }
 
-function _renderManage(el) {
-  if (!el) return;
+function _buildManageHtml() {
   const cast = getCastMembers();
 
-  // Actor list
   const rows = actorCues.map(a => {
     const cueCount = (a.cues || []).length;
     return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--bg-border);">' +
@@ -89,7 +88,6 @@ function _renderManage(el) {
     return chars.map(ch => '<option value="' + escapeHtml(m.id + '::' + ch) + '">' + escapeHtml(ch) + ' (' + escapeHtml(m.name) + ')</option>').join('');
   }).join('');
 
-  // Cue editing form (if editing)
   let cueEditHtml = '';
   if (_editingActorId) {
     const actor = actorCues.find(a => a.id === _editingActorId);
@@ -116,7 +114,7 @@ function _renderManage(el) {
     }
   }
 
-  el.innerHTML = '<div style="padding:24px;">' +
+  return '<div style="padding:24px;">' +
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;"><h3 style="font-size:16px;color:var(--track-actor);margin:0;">Manage Actors</h3><div style="display:flex;gap:8px;"><button class="settings-btn" id="actors-import-btn">Import JSON</button><button class="settings-btn" id="actors-export-btn">Export CSV</button></div></div>' +
     cueEditHtml +
     '<div style="background:var(--bg-raised);border:1px solid var(--bg-border);border-radius:8px;padding:16px;margin-bottom:20px;">' +
@@ -124,12 +122,14 @@ function _renderManage(el) {
     '<select class="form-select" id="actor-char-select"><option value="">Select character…</option>' + castOptions + '</select>' +
     '<button class="modal-btn-primary" id="actor-add-btn">+ Add Actor</button></div></div>' +
     '<div id="actor-list">' + rows + '</div></div>';
+}
 
-  // Wire events
-  el.querySelector('#actor-add-btn')?.addEventListener('click', async () => {
-    const val = el.querySelector('#actor-char-select')?.value;
+function _wireManageEvents(container) {
+  container.querySelector('#actor-add-btn')?.addEventListener('click', async () => {
+    const val = container.querySelector('#actor-char-select')?.value;
     if (!val) { toast('Select a character.', 'error'); return; }
     const [castId, charName] = val.split('::');
+    const cast = getCastMembers();
     const member = cast.find(m => m.id === castId);
     try {
       await addDoc(collection(db, 'productions', state.activeProduction.id, 'actorCues'), {
@@ -140,31 +140,33 @@ function _renderManage(el) {
     } catch (e) { toast('Failed.', 'error'); }
   });
 
-  el.querySelectorAll('.actor-edit-btn').forEach(btn => btn.addEventListener('click', () => {
+  container.querySelectorAll('.actor-edit-btn').forEach(btn => btn.addEventListener('click', () => {
     const actor = actorCues.find(a => a.id === btn.dataset.id);
     if (!actor) return;
     _editingActorId = btn.dataset.id;
     _actorCueRows = (actor.cues || []).map(c => ({ ...c }));
-    renderActorsContent(document.getElementById('props-content'));
+    const cont = document.getElementById('props-content');
+    renderActorsContent(cont);
+    if (cont) cont.scrollTop = 0;
   }));
 
-  el.querySelectorAll('.actor-del-btn').forEach(btn => btn.addEventListener('click', async () => {
+  container.querySelectorAll('.actor-del-btn').forEach(btn => btn.addEventListener('click', async () => {
     if (!confirmDialog('Delete this actor tracking?')) return;
     try { await deleteDoc(doc(db, 'productions', state.activeProduction.id, 'actorCues', btn.dataset.id)); toast('Deleted.', 'success'); }
     catch (e) { toast('Failed.', 'error'); }
   }));
 
-  // Cue editing wiring
-  el.querySelector('#actor-add-cue-btn')?.addEventListener('click', () => {
+  container.querySelector('#actor-add-cue-btn')?.addEventListener('click', () => {
+    _syncActorCueRows(container);
     _actorCueRows.push({ holdPage: '', enterPage: '', exitPage: '', enterLocation: 'backstage-left', exitLocation: 'backstage-right', holdLocation: '' });
     renderActorsContent(document.getElementById('props-content'));
   });
-  el.querySelectorAll('.remove-cue-btn').forEach(btn => btn.addEventListener('click', () => {
-    _syncActorCueRows(el); _actorCueRows.splice(parseInt(btn.dataset.idx), 1);
+  container.querySelectorAll('.remove-cue-btn').forEach(btn => btn.addEventListener('click', () => {
+    _syncActorCueRows(container); _actorCueRows.splice(parseInt(btn.dataset.idx), 1);
     renderActorsContent(document.getElementById('props-content'));
   }));
-  el.querySelector('#actor-save-cues-btn')?.addEventListener('click', async () => {
-    _syncActorCueRows(el);
+  container.querySelector('#actor-save-cues-btn')?.addEventListener('click', async () => {
+    _syncActorCueRows(container);
     const cues = _actorCueRows.map(c => ({
       holdPage: parseInt(c.holdPage) || 0, enterPage: parseInt(c.enterPage) || 0, exitPage: parseInt(c.exitPage) || 0,
       enterLocation: c.enterLocation || 'backstage-left', exitLocation: c.exitLocation || 'backstage-right',
@@ -178,14 +180,13 @@ function _renderManage(el) {
       toast('Cues saved!', 'success'); _editingActorId = null; _actorCueRows = [];
     } catch (e) { toast('Failed to save.', 'error'); }
   });
-  el.querySelector('#actor-cancel-edit-btn')?.addEventListener('click', () => {
+  container.querySelector('#actor-cancel-edit-btn')?.addEventListener('click', () => {
     _editingActorId = null; _actorCueRows = [];
     renderActorsContent(document.getElementById('props-content'));
   });
 
-  // Import / Export
-  el.querySelector('#actors-export-btn')?.addEventListener('click', () => _exportActorsCSV());
-  el.querySelector('#actors-import-btn')?.addEventListener('click', () => _importActorsJSON());
+  container.querySelector('#actors-export-btn')?.addEventListener('click', () => _exportActorsCSV());
+  container.querySelector('#actors-import-btn')?.addEventListener('click', () => _importActorsJSON());
 }
 
 function _exportActorsCSV() {
@@ -287,8 +288,8 @@ Rules:
   });
 }
 
-function _syncActorCueRows(el) {
-  el.querySelectorAll('.cue-row').forEach((row, i) => {
+function _syncActorCueRows(container) {
+  container.querySelectorAll('.cue-row').forEach((row, i) => {
     if (_actorCueRows[i]) {
       _actorCueRows[i].holdPage = row.querySelector('.ac-hold')?.value || '';
       _actorCueRows[i].enterPage = row.querySelector('.ac-enter')?.value || '';
@@ -299,8 +300,7 @@ function _syncActorCueRows(el) {
   });
 }
 
-function _renderView(el) {
-  if (!el) return;
+function _buildViewHtml() {
   const page = state.runSession?.currentPage || 1;
   const warnPgs = state.runSession?.timerWarnPages || 5;
   const offActors = [], holdActors = [], onActors = [];
@@ -321,7 +321,7 @@ function _renderView(el) {
       '<div style="color:var(--text-muted);font-size:11px;">' + escapeHtml(a.actorName || '') + '</div></div>';
   };
 
-  el.innerHTML = '<div style="padding:24px;">' +
+  return '<div style="padding:24px;">' +
     '<div style="display:flex;gap:12px;margin-bottom:16px;font-size:12px;color:var(--text-muted);">Page: <strong style="color:var(--text-primary);">' + page + '</strong></div>' +
     '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">' +
     '<div><h4 style="font-size:11px;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;">Off Stage (' + offActors.length + ')</h4>' + (offActors.map(i => pill(i, 'var(--state-off)')).join('') || '<div style="color:var(--text-muted);font-size:12px;">—</div>') + '</div>' +

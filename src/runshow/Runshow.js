@@ -369,10 +369,6 @@ export function initRunShow() {
     if (menu?.style.display !== 'none') { rsHideBookmarksMenu(); } else { rsShowBookmarksMenu(); }
   });
   document.addEventListener('click', () => rsHideBookmarksMenu());
-  document.getElementById('rs-send-btn')?.addEventListener('click', rsOpenSendNotes);
-
-  // Feature 7: Email Notes button
-  document.getElementById('rs-email-notes-btn')?.addEventListener('click', rsOpenEmailNotes);
   document.getElementById('rs-toggle-actor-pills')?.addEventListener('click', () => {
     rsShowActorPills = !rsShowActorPills;
     const btn = document.getElementById('rs-toggle-actor-pills');
@@ -2069,10 +2065,6 @@ function _openMailto(uri) {
   setTimeout(() => frame.remove(), 4000);
 }
 
-/* ═══════════════════════════════════════════════════════════
-   FEATURE 7: PER-ACTOR EMAIL NOTES (revised)
-   ═══════════════════════════════════════════════════════════ */
-
 /**
  * Expand a note into a byCastId grouping map, supporting multi-actor notes.
  * Notes with an `actors` array appear in each actor's bucket.
@@ -2142,115 +2134,6 @@ function _copyToClipboard(text) {
       toast('Copied \u2014 paste into your email client');
     }
   );
-}
-
-/**
- * Opens the Email Notes modal.
- *
- * Features:
- *  \u2022 "Email All N Actors" button \u2014 opens staggered mailto windows
- *  \u2022 Per-actor Email + Copy buttons
- *  \u2022 Warning banner when actors are missing email addresses
- *  \u2022 Email body includes Page, Type, Line, and Note for every note
- */
-function rsOpenEmailNotes() {
-  if (rsNotes.length === 0) { toast('No notes to email'); return; }
-  const emailModal = document.getElementById('rs-email-notes-modal');
-  if (!emailModal) return;
-  emailModal.classList.add('open');
-
-  // ── Group notes by cast member ──
-  const cast = getCastMembers();
-  const byCastId = {};
-  rsNotes.forEach(n => _expandNoteIntoByCastId(n, byCastId, cast));
-
-  const show = state.activeProduction?.title || '';
-  const dateStr = new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-  const subject = 'Line Notes \u2014 ' + show + ' \u2014 ' + dateStr;
-  const totalNotes = rsNotes.length;
-  const actorEntries = Object.entries(byCastId).filter(([, d]) => d.notes.length > 0);
-  const actorCount = actorEntries.length;
-  const actorsWithEmail = actorEntries.filter(([, d]) => !!d.actorEmail);
-  const actorsWithoutEmail = actorEntries.filter(([, d]) => !d.actorEmail);
-
-  // ── Per-actor rows ──
-  const actorRows = actorEntries.map(([cid, data]) => {
-    const noteCount = data.notes.length;
-    const hasEmail = !!data.actorEmail;
-    const body = _buildActorEmailBody(data.actorName, data.notes, show, dateStr);
-    const mailtoUri = hasEmail ? _buildMailtoUri(data.actorEmail, subject, body) : '';
-    const emailDisplay = hasEmail
-      ? '<span class="actor-email">' + escapeHtml(data.actorEmail) + '</span>'
-      : '<span class="actor-email actor-email--warn">No email \u2014 update in Cast &amp; Crew tab</span>';
-
-    return '<div class="email-actor-row" data-castid="' + escapeHtml(cid) + '">'
-      + '<div class="actor-dot" style="background:' + escapeHtml(data.color) + '"></div>'
-      + '<div class="actor-info"><span class="actor-name">' + escapeHtml(data.actorName) + '</span>' + emailDisplay + '</div>'
-      + '<span class="actor-note-count">' + noteCount + ' note' + (noteCount !== 1 ? 's' : '') + '</span>'
-      + '<button class="modal-btn-primary email-single-btn' + (hasEmail ? '' : ' email-open-btn--disabled') + '"'
-      +   ' data-mailto="' + escapeHtml(mailtoUri) + '"'
-      +   ' title="Email ' + escapeHtml(data.actorName) + '">Email</button>'
-      + '<button class="modal-btn-cancel email-copy-btn"'
-      +   ' data-body="' + escapeHtml(body) + '"'
-      +   ' title="Copy notes for ' + escapeHtml(data.actorName) + '">Copy</button>'
-      + '</div>';
-  }).join('');
-
-  // ── Warning + Email All ──
-  const emailAllDisabled = actorsWithEmail.length === 0;
-  const emailAllLabel = emailAllDisabled
-    ? 'No actors have email addresses'
-    : 'Email All ' + actorsWithEmail.length + ' Actor' + (actorsWithEmail.length !== 1 ? 's' : '');
-  const warningBanner = actorsWithoutEmail.length > 0
-    ? '<div class="email-notes-warning">'
-      + actorsWithoutEmail.length + ' actor' + (actorsWithoutEmail.length !== 1 ? 's' : '')
-      + ' missing email \u2014 update in Cast &amp; Crew tab</div>'
-    : '';
-
-  // ── Render modal ──
-  emailModal.innerHTML = '<div class="send-notes-card">'
-    + '<h3>Email Notes</h3>'
-    + '<div class="email-notes-meta">' + escapeHtml(dateStr)
-    +   ' \u00b7 ' + totalNotes + ' notes \u00b7 ' + actorCount + ' actors</div>'
-    + warningBanner
-    + '<div class="email-all-section">'
-    +   '<button class="email-all-btn' + (emailAllDisabled ? ' email-open-btn--disabled' : '')
-    +     '" id="rs-email-all-btn">' + emailAllLabel + '</button>'
-    + '</div>'
-    + actorRows
-    + '<div class="send-notes-actions">'
-    +   '<button class="modal-btn-cancel" id="rs-email-notes-close">Close</button>'
-    + '</div></div>';
-
-  // ── Event listeners ──
-
-  // Close
-  emailModal.querySelector('#rs-email-notes-close').addEventListener('click', () => emailModal.classList.remove('open'));
-  emailModal.addEventListener('click', e => { if (e.target === emailModal) emailModal.classList.remove('open'); });
-
-  // "Email All" \u2014 stagger mailto opens to avoid popup-blocker issues
-  if (!emailAllDisabled) {
-    emailModal.querySelector('#rs-email-all-btn').addEventListener('click', () => {
-      let delay = 0;
-      actorsWithEmail.forEach(([cid, data]) => {
-        const body = _buildActorEmailBody(data.actorName, data.notes, show, dateStr);
-        const uri = _buildMailtoUri(data.actorEmail, subject, body);
-        setTimeout(() => { _openMailto(uri); }, delay);
-        delay += 600;
-      });
-      toast('Opening ' + actorsWithEmail.length + ' email' + (actorsWithEmail.length !== 1 ? 's' : '') + '\u2026');
-    });
-  }
-
-  // Per-actor email buttons
-  emailModal.querySelectorAll('.email-single-btn:not(.email-open-btn--disabled)').forEach(btn => {
-    btn.addEventListener('click', () => { _openMailto(btn.dataset.mailto); });
-  });
-
-  // Per-actor copy buttons
-  emailModal.querySelectorAll('.email-copy-btn').forEach(btn => {
-    btn.addEventListener('click', () => _copyToClipboard(btn.dataset.body));
-  });
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -2702,8 +2585,6 @@ async function emailReport() {
   const totalNotes = sessionNotes.length;
   const actorEntries = Object.entries(byCastId).filter(([, d]) => d.notes.length > 0);
   const actorCount = actorEntries.length;
-  const actorsWithEmail = actorEntries.filter(([, d]) => !!d.actorEmail);
-  const actorsWithoutEmail = actorEntries.filter(([, d]) => !d.actorEmail);
 
   // Per-actor rows
   const actorRows = actorEntries.map(([cid, data]) => {
@@ -2728,26 +2609,10 @@ async function emailReport() {
       + '</div>';
   }).join('');
 
-  // Warning + Email All
-  const emailAllDisabled = actorsWithEmail.length === 0;
-  const emailAllLabel = emailAllDisabled
-    ? 'No actors have email addresses'
-    : 'Email All ' + actorsWithEmail.length + ' Actor' + (actorsWithEmail.length !== 1 ? 's' : '');
-  const warningBanner = actorsWithoutEmail.length > 0
-    ? '<div class="email-notes-warning">'
-      + actorsWithoutEmail.length + ' actor' + (actorsWithoutEmail.length !== 1 ? 's' : '')
-      + ' missing email \u2014 update in Cast &amp; Crew tab</div>'
-    : '';
-
   // Build inline email UI
   const emailHtml = '<div style="max-width:620px;margin:0 auto;">'
     + '<div class="email-notes-meta">' + escapeHtml(dateStr)
     +   ' \u00b7 ' + totalNotes + ' notes \u00b7 ' + actorCount + ' actors</div>'
-    + warningBanner
-    + '<div class="email-all-section">'
-    +   '<button class="email-all-btn' + (emailAllDisabled ? ' email-open-btn--disabled' : '')
-    +     '" id="rs-rpt-email-all">' + emailAllLabel + '</button>'
-    + '</div>'
     + actorRows
     + '</div>';
 
@@ -2771,20 +2636,6 @@ async function emailReport() {
   _reportEmailMode = true;
 
   // Wire up event listeners on the inline email UI
-
-  // "Email All" — stagger mailto opens
-  if (!emailAllDisabled) {
-    document.getElementById('rs-rpt-email-all')?.addEventListener('click', () => {
-      let delay = 0;
-      actorsWithEmail.forEach(([cid, data]) => {
-        const mbody = _buildActorEmailBody(data.actorName, data.notes, show, dateStr);
-        const uri = _buildMailtoUri(data.actorEmail, subject, mbody);
-        setTimeout(() => { _openMailto(uri); }, delay);
-        delay += 600;
-      });
-      toast('Opening ' + actorsWithEmail.length + ' email' + (actorsWithEmail.length !== 1 ? 's' : '') + '\u2026');
-    });
-  }
 
   // Per-actor Email buttons
   if (reportBody) {
@@ -2947,15 +2798,17 @@ async function loadReportsHistory() {
           const dateStr = s.date?.toDate
             ? s.date.toDate().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
             : '—';
-          return `<div class="rs-report-row" data-id="${escapeHtml(s.id)}" style="display:flex;align-items:center;gap:10px;padding:10px;background:var(--bg-card);border:1px solid var(--bg-border);border-radius:6px;margin-bottom:6px;cursor:pointer;">
-            <div style="flex:1;min-width:0;">
+          return `<div class="rs-report-row" data-id="${escapeHtml(s.id)}" style="padding:10px;background:var(--bg-card);border:1px solid var(--bg-border);border-radius:6px;margin-bottom:6px;cursor:pointer;">
+            <div style="min-width:0;margin-bottom:8px;">
               <div style="color:var(--text-primary);font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(s.title || 'Untitled')}</div>
               <div style="color:var(--text-muted);font-size:11px;font-family:'DM Mono',monospace;">${dateStr} &middot; ${formatTime(s.durationSeconds || 0)} &middot; ${s.noteCount || 0} note${(s.noteCount || 0) !== 1 ? 's' : ''}</div>
             </div>
-            <button class="settings-btn" data-id="${escapeHtml(s.id)}">View</button>
-            ${owner && s.pageLog?.length > 0 ? `<button class="settings-btn rs-edit-times" data-id="${escapeHtml(s.id)}">Edit Times</button>` : ''}
-            ${(s.createdBy === state.currentUser?.uid || owner) ? `<button class="settings-btn rs-resume-session" data-id="${escapeHtml(s.id)}">Resume</button>` : ''}
-            ${owner ? `<button class="settings-btn settings-btn--danger rs-delete-report" data-id="${escapeHtml(s.id)}">Delete</button>` : ''}
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <button class="settings-btn" data-id="${escapeHtml(s.id)}">View</button>
+              ${owner && s.pageLog?.length > 0 ? `<button class="settings-btn rs-edit-times" data-id="${escapeHtml(s.id)}">Edit Times</button>` : ''}
+              ${(s.createdBy === state.currentUser?.uid || owner) ? `<button class="settings-btn rs-resume-session" data-id="${escapeHtml(s.id)}">Resume</button>` : ''}
+              ${owner ? `<button class="settings-btn settings-btn--danger rs-delete-report" data-id="${escapeHtml(s.id)}">Delete</button>` : ''}
+            </div>
           </div>`;
         }).join('')}
       </div>`;
@@ -3015,51 +2868,3 @@ async function loadReportsHistory() {
   }
 }
 
-/* ═══════════════════════════════════════════════════════════
-   SEND NOTES (migrated from linenotes.js)
-   ═══════════════════════════════════════════════════════════ */
-function rsOpenSendNotes() {
-  if (rsNotes.length === 0) { toast('No notes to send'); return; }
-  const sendModal = document.getElementById('rs-send-notes-modal');
-  if (!sendModal) return;
-  sendModal.classList.add('open');
-
-  const cast = getCastMembers();
-  const byCastId = {};
-  rsNotes.forEach(n => _expandNoteIntoByCastId(n, byCastId, cast));
-
-  const date = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
-  const show = state.activeProduction?.title || '';
-
-  const sections = Object.entries(byCastId).filter(([, d]) => d.notes.length > 0).map(([cid, data]) => {
-    const sorted = [...data.notes].sort((a, b) => a.page - b.page || (a.bounds?.y || 0) - (b.bounds?.y || 0));
-    const rows = sorted.map(n => {
-      const charLabel = n.characterName || n.charName || '';
-      return `<div class="send-note-row" style="border-left-color:${escapeHtml(data.color)}"><strong>p.${rsScriptLabel(n.page, n.half)}</strong>${charLabel ? ` [${escapeHtml(charLabel)}]` : ''} [${escapeHtml(n.type)}] <em>${escapeHtml((n.lineText || '').slice(0, 100))}</em>${n.noteBody ? `<div style="color:#c8a96e;font-size:11px;margin-top:2px;"><strong>Note:</strong> ${escapeHtml(n.noteBody)}</div>` : ''}</div>`;
-    }).join('');
-    return `<div class="send-char-section"><div class="send-char-header"><div style="width:10px;height:10px;border-radius:50%;background:${escapeHtml(data.color)};display:inline-block;"></div><span class="char-name">${escapeHtml(data.actorName)}</span>${data.actorEmail ? `<span style="font-size:11px;color:#5c5850;font-family:'DM Mono',monospace;margin-left:8px;">${escapeHtml(data.actorEmail)}</span>` : ''}</div>${rows}</div>`;
-  }).join('');
-
-  sendModal.innerHTML = `<div class="send-notes-card"><h3>Send Line Notes</h3><div style="font-family:'DM Mono',monospace;font-size:11px;color:#5c5850;margin-bottom:16px;">${date} \u00b7 ${rsNotes.length} note${rsNotes.length !== 1 ? 's' : ''}</div>${sections}<div class="send-notes-actions"><button class="modal-btn-primary" id="rs-send-print">Generate Notes Report \u2197</button><button class="modal-btn-cancel" id="rs-send-close">Close</button></div></div>`;
-
-  sendModal.querySelector('#rs-send-close').addEventListener('click', () => sendModal.classList.remove('open'));
-  sendModal.addEventListener('click', e => { if (e.target === sendModal) sendModal.classList.remove('open'); });
-  sendModal.querySelector('#rs-send-print').addEventListener('click', () => {
-    const w = window.open('', '_blank');
-    if (!w) { toast('Allow popups'); return; }
-    let html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Line Notes</title><style>@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&family=DM+Sans:wght@400;500&display=swap');*{box-sizing:border-box;margin:0;padding:0}body{font-family:'DM Sans',sans-serif;background:#f5f3ee;color:#1a1814;padding:40px 48px}h1{font-family:'Instrument Serif',serif;font-size:32px;margin-bottom:6px}.meta{font-family:'DM Mono',monospace;font-size:12px;color:#999;margin-bottom:36px}.s{background:#fff;border-radius:10px;padding:22px 26px;margin-bottom:20px;box-shadow:0 2px 10px rgba(0,0,0,.07)}.sh{display:flex;align-items:center;gap:10px;margin-bottom:16px;padding-bottom:14px;border-bottom:1px solid #f0ede4}.sd{width:12px;height:12px;border-radius:50%}.sn{font-size:18px;font-weight:500;flex:1}.se{font-family:'DM Mono',monospace;font-size:11px;color:#999;margin-top:2px}.nr{display:flex;gap:12px;align-items:flex-start;padding:10px 0;border-bottom:1px solid #f5f3ee}.nr:last-child{border-bottom:none}.np{font-family:'DM Mono',monospace;font-size:10px;font-weight:500;color:#fff;padding:3px 8px;border-radius:3px;flex-shrink:0;margin-top:3px}.nd{display:flex;flex-direction:column;gap:5px}.pg{font-family:'DM Mono',monospace;font-size:11px;color:#aaa;margin-right:6px}.tl{font-size:13px;font-weight:500;color:#444}.lt{font-family:'Instrument Serif',serif;font-style:italic;font-size:15px;color:#333}@media print{body{padding:20px}}</style></head><body><h1>Line Notes</h1><div class="meta">${escapeHtml(show)} \u00b7 ${date} \u00b7 ${rsNotes.length} note${rsNotes.length !== 1 ? 's' : ''}</div>`;
-    Object.entries(byCastId).forEach(([, data]) => {
-      if (!data.notes.length) return;
-      const sorted = [...data.notes].sort((a, b) => a.page - b.page);
-      html += `<section class="s"><div class="sh"><span class="sd" style="background:${escapeHtml(data.color)}"></span><div style="flex:1"><div class="sn">${escapeHtml(data.actorName)}</div>${data.actorEmail ? `<div class="se">${escapeHtml(data.actorEmail)}</div>` : ''}</div></div>`;
-      sorted.forEach(n => {
-        const charLabel = n.characterName || n.charName || '';
-        html += `<div class="nr"><div class="np" style="background:${escapeHtml(data.color)}">${escapeHtml(n.type)}</div><div class="nd"><div><span class="pg">p.${rsScriptLabel(n.page, n.half)}</span>${charLabel ? `<span style="font-size:11px;color:#aaa;margin-right:6px;">[${escapeHtml(charLabel)}]</span>` : ''}<span class="tl">${NOTE_TYPES_MAP[n.type] || n.type}</span></div>${n.lineText ? `<div class="lt">\u201c${escapeHtml(n.lineText)}\u201d</div>` : ''}${n.noteBody ? `<div style="font-size:13px;color:#555;margin-top:4px;"><strong>Note:</strong> ${escapeHtml(n.noteBody)}</div>` : ''}</div></div>`;
-      });
-      html += '</section>';
-    });
-    html += '</body></html>';
-    w.document.write(html); w.document.close();
-    sendModal.classList.remove('open'); toast('Notes report opened');
-  });
-}

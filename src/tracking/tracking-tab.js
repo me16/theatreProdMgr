@@ -11,6 +11,7 @@
 import { onPropsTabActivated } from '../props/props.js';
 import { subscribeToActorCues, renderActorsContent } from './actors.js';
 import { subscribeToCostumes, renderCostumesContent } from './costumes.js';
+import { subscribeToLocations } from './locations.js';
 import { state } from '../shared/state.js';
 import { isOwner } from '../shared/roles.js';
 
@@ -58,6 +59,8 @@ function _activateTrackingType(type) {
   const propsSubtabs = document.getElementById('props-subtabs');
   const propsContent = document.getElementById('props-content');
 
+  _ensureLocationSub();
+
   switch (type) {
     case 'props':
       // Props: show existing subtabs + content
@@ -87,6 +90,16 @@ export function getActiveTrackingType() {
 
 // Ensure Firestore subscriptions are active for all tracking types
 let _trackingSubbed = false;
+let _locationsSubbed = false;
+
+function _ensureLocationSub() {
+  if (_locationsSubbed) return;
+  const pid = state.activeProduction?.id;
+  if (!pid) return;
+  _locationsSubbed = true;
+  subscribeToLocations(pid);
+}
+
 function _ensureTrackingSubs() {
   if (_trackingSubbed) return;
   const pid = state.activeProduction?.id;
@@ -96,5 +109,5 @@ function _ensureTrackingSubs() {
   subscribeToCostumes(pid);
 }
 
-// Reset subscription flag on production change (called from cleanup)
-export function resetTrackingSubs() { _trackingSubbed = false; }
+// Reset subscription flags on production change (called from cleanup)
+export function resetTrackingSubs() { _trackingSubbed = false; _locationsSubbed = false; }

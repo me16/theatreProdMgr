@@ -48,14 +48,18 @@ export function renderCostumesContent(container) {
     const label = t === 'manage' ? 'Manage Costumes' : 'View Show';
     html += '<button class="props-subtab costume-inner-tab' + (activeInnerTab === t ? ' props-subtab--active' : '') + '" data-tab="' + t + '">' + label + '</button>';
   });
-  html += '</div><div id="costumes-inner-content" style="flex:1;overflow-y:auto;"></div>';
+  html += '</div>';
+
+  if (activeInnerTab === 'manage' && owner) html += _buildManageHtml();
+  else html += _buildViewHtml();
+
   container.innerHTML = html;
+
   container.querySelectorAll('.costume-inner-tab').forEach(btn => {
     btn.addEventListener('click', () => { activeInnerTab = btn.dataset.tab; renderCostumesContent(container); });
   });
-  const inner = container.querySelector('#costumes-inner-content');
-  if (activeInnerTab === 'manage' && owner) _renderManage(inner);
-  else _renderView(inner);
+
+  if (activeInnerTab === 'manage' && owner) _wireManageEvents(container);
 }
 
 function _locOpts(selected) {
@@ -65,8 +69,7 @@ function _locOpts(selected) {
   return locs.map(l => '<option value="' + l.id + '"' + (l.id === res ? ' selected' : '') + '>' + l.shortName + '</option>').join('');
 }
 
-function _renderManage(el) {
-  if (!el) return;
+function _buildManageHtml() {
   const cast = getCastMembers();
   const rows = costumes.map(c => {
     const cueCount = (c.cues || []).length;
@@ -85,7 +88,6 @@ function _renderManage(el) {
     return chars.map(ch => '<option value="' + escapeHtml(m.id + '::' + ch) + '">' + escapeHtml(ch) + '</option>').join('');
   }).join('');
 
-  // Cue editing
   let cueEditHtml = '';
   if (_editingCostumeId) {
     const costume = costumes.find(c => c.id === _editingCostumeId);
@@ -109,7 +111,7 @@ function _renderManage(el) {
     }
   }
 
-  el.innerHTML = '<div style="padding:24px;">' +
+  return '<div style="padding:24px;">' +
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;"><h3 style="font-size:16px;color:var(--track-costume);margin:0;">Manage Costumes</h3><div style="display:flex;gap:8px;"><button class="settings-btn" id="costumes-import-btn">Import JSON</button><button class="settings-btn" id="costumes-export-btn">Export CSV</button></div></div>' +
     cueEditHtml +
     '<div style="background:var(--bg-raised);border:1px solid var(--bg-border);border-radius:8px;padding:16px;margin-bottom:16px;">' +
@@ -118,12 +120,13 @@ function _renderManage(el) {
     '<select class="form-select" id="costume-char-select"><option value="">Character…</option>' + castOptions + '</select>' +
     '<button class="modal-btn-primary" id="costume-add-btn">+ Add Costume</button></div></div>' +
     '<div id="costume-list">' + rows + '</div></div>';
+}
 
-  // Wire add
-  el.querySelector('#costume-add-btn')?.addEventListener('click', async () => {
-    const name = sanitizeName(el.querySelector('#costume-name-input')?.value);
+function _wireManageEvents(container) {
+  container.querySelector('#costume-add-btn')?.addEventListener('click', async () => {
+    const name = sanitizeName(container.querySelector('#costume-name-input')?.value);
     if (!name) { toast('Name required.', 'error'); return; }
-    const charVal = el.querySelector('#costume-char-select')?.value || '';
+    const charVal = container.querySelector('#costume-char-select')?.value || '';
     const [castId, charName] = charVal ? charVal.split('::') : ['', ''];
     try {
       await addDoc(collection(db, 'productions', state.activeProduction.id, 'costumes'), {
@@ -133,29 +136,33 @@ function _renderManage(el) {
       toast('Costume added!', 'success');
     } catch (e) { toast('Failed.', 'error'); }
   });
-  el.querySelectorAll('.costume-del-btn').forEach(btn => btn.addEventListener('click', async () => {
+
+  container.querySelectorAll('.costume-del-btn').forEach(btn => btn.addEventListener('click', async () => {
     if (!confirmDialog('Delete this costume?')) return;
     try { await deleteDoc(doc(db, 'productions', state.activeProduction.id, 'costumes', btn.dataset.id)); toast('Deleted.', 'success'); } catch (e) { toast('Failed.', 'error'); }
   }));
 
-  // Wire cue editing
-  el.querySelectorAll('.costume-edit-btn').forEach(btn => btn.addEventListener('click', () => {
+  container.querySelectorAll('.costume-edit-btn').forEach(btn => btn.addEventListener('click', () => {
     const costume = costumes.find(c => c.id === btn.dataset.id);
     if (!costume) return;
     _editingCostumeId = btn.dataset.id;
     _costumeCueRows = (costume.cues || []).map(c => ({ ...c }));
-    renderCostumesContent(document.getElementById('props-content'));
+    const cont = document.getElementById('props-content');
+    renderCostumesContent(cont);
+    if (cont) cont.scrollTop = 0;
   }));
-  el.querySelector('#costume-add-cue-btn')?.addEventListener('click', () => {
-    _syncCostumeCueRows(el); _costumeCueRows.push({ startPage: '', endPage: '', changeLocation: 'backstage-left', isQuickChange: false });
+
+  container.querySelector('#costume-add-cue-btn')?.addEventListener('click', () => {
+    _syncCostumeCueRows(container);
+    _costumeCueRows.push({ startPage: '', endPage: '', changeLocation: 'backstage-left', isQuickChange: false });
     renderCostumesContent(document.getElementById('props-content'));
   });
-  el.querySelectorAll('.remove-cue-btn').forEach(btn => btn.addEventListener('click', () => {
-    _syncCostumeCueRows(el); _costumeCueRows.splice(parseInt(btn.dataset.idx), 1);
+  container.querySelectorAll('.remove-cue-btn').forEach(btn => btn.addEventListener('click', () => {
+    _syncCostumeCueRows(container); _costumeCueRows.splice(parseInt(btn.dataset.idx), 1);
     renderCostumesContent(document.getElementById('props-content'));
   }));
-  el.querySelector('#costume-save-cues-btn')?.addEventListener('click', async () => {
-    _syncCostumeCueRows(el);
+  container.querySelector('#costume-save-cues-btn')?.addEventListener('click', async () => {
+    _syncCostumeCueRows(container);
     const cues = _costumeCueRows.map(c => ({
       startPage: parseInt(c.startPage) || 0, endPage: parseInt(c.endPage) || 0,
       changeLocation: c.changeLocation || 'backstage-left', isQuickChange: !!c.isQuickChange,
@@ -167,16 +174,15 @@ function _renderManage(el) {
     try {
       await updateDoc(doc(db, 'productions', state.activeProduction.id, 'costumes', _editingCostumeId), { cues });
       toast('Cues saved!', 'success'); _editingCostumeId = null; _costumeCueRows = [];
-    } catch (e) { toast('Failed.', 'error'); }
+    } catch (e) { toast('Failed to save.', 'error'); }
   });
-  el.querySelector('#costume-cancel-edit-btn')?.addEventListener('click', () => {
+  container.querySelector('#costume-cancel-edit-btn')?.addEventListener('click', () => {
     _editingCostumeId = null; _costumeCueRows = [];
     renderCostumesContent(document.getElementById('props-content'));
   });
 
-  // Import / Export
-  el.querySelector('#costumes-export-btn')?.addEventListener('click', () => _exportCostumesCSV());
-  el.querySelector('#costumes-import-btn')?.addEventListener('click', () => _importCostumesJSON());
+  container.querySelector('#costumes-export-btn')?.addEventListener('click', () => _exportCostumesCSV());
+  container.querySelector('#costumes-import-btn')?.addEventListener('click', () => _importCostumesJSON());
 }
 
 function _exportCostumesCSV() {
@@ -274,8 +280,8 @@ Rules:
   });
 }
 
-function _syncCostumeCueRows(el) {
-  el.querySelectorAll('.cue-row').forEach((row, i) => {
+function _syncCostumeCueRows(container) {
+  container.querySelectorAll('.cue-row').forEach((row, i) => {
     if (_costumeCueRows[i]) {
       _costumeCueRows[i].startPage = row.querySelector('.co-start')?.value || '';
       _costumeCueRows[i].endPage = row.querySelector('.co-end')?.value || '';
@@ -285,8 +291,7 @@ function _syncCostumeCueRows(el) {
   });
 }
 
-function _renderView(el) {
-  if (!el) return;
+function _buildViewHtml() {
   const page = state.runSession?.currentPage || 1;
   const warnPgs = state.runSession?.timerWarnPages || 5;
   const wearing = [], upcoming = [], quickChanges = [];
@@ -309,7 +314,7 @@ function _renderView(el) {
     '<span style="color:var(--text-muted);font-size:11px;margin-left:auto;">in ' + pagesUntil + ' pg' + (pagesUntil !== 1 ? 's' : '') + '</span></div></div>'
   ).join('') : '<div style="color:var(--text-muted);font-size:12px;">No upcoming quick changes.</div>';
 
-  el.innerHTML = '<div style="padding:24px;">' +
+  return '<div style="padding:24px;">' +
     '<h4 style="font-size:12px;text-transform:uppercase;color:var(--qc-alert);margin-bottom:8px;">Quick Change Alerts</h4>' + qcHtml +
     '<h4 style="font-size:12px;text-transform:uppercase;color:var(--text-muted);margin:20px 0 8px;">Currently Wearing (' + wearing.length + ')</h4>' +
     (wearing.map(({ costume: c }) => '<div style="padding:4px 8px;background:var(--bg-card);border-radius:5px;margin-bottom:3px;font-size:12px;border-left:3px solid var(--track-costume);">' +

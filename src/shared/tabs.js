@@ -82,3 +82,13 @@ export function resetToPropsTab() {
 export function getActiveTab() {
   return activeTab;
 }
+
+export function updateScriptEditorTab() {
+  const runActive = !!state.runSession;
+  const btn = document.querySelector('.app-tab[data-tab="linenotes"]');
+  if (!btn) return;
+  btn.classList.toggle('app-tab--disabled', runActive);
+  if (runActive && activeTab === 'linenotes') {
+    switchTab('runshow');
+  }
+}

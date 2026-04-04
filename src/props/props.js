@@ -14,6 +14,7 @@ import { syncSessionToFirestore, startSessionSync, stopSessionSync, hideHeartbea
 import { loadCheckState, saveCheckState, checkProgress, renderProgressBar } from '../shared/check-state.js';
 import { updateRouteParams } from '../shared/router.js';
 import { getProductionLocations } from '../tracking/locations.js';
+import { updateScriptEditorTab } from '../shared/tabs.js';
 
 function _locOptions(selectedVal) {
   const locs = getProductionLocations();
@@ -180,7 +181,8 @@ function setActiveTab(tab) {
   } else {
     manageTab?.classList.remove('hidden');
   }
-  renderContent();
+  if (tab === 'manage') renderManageTab();
+  else renderContent();
 }
 
 export function showApp() {
@@ -245,7 +247,14 @@ function renderContent() {
 }
 
 export function onPropsTabActivated() {
-  renderContent();
+  // Always re-render when explicitly returning to the Props tracking type,
+  // even if editingPropId is set (the guard in renderContent() is only for
+  // Firestore real-time updates to avoid wiping out unsaved form input).
+  if (activeTab === 'manage' && editingPropId) {
+    renderManageTab();
+  } else {
+    renderContent();
+  }
 }
 
 /* ======================== MANAGE PROPS TAB ======================== */
@@ -523,7 +532,7 @@ function startEdit(propId) {
       cueRows.push({ enterPage: prop.enters[i], exitPage: prop.exits?.[i] || prop.enters[i], enterLocation: '', exitLocation: prop.endLocation || 'SL', carrierOn: '', carrierOff: '', mover: '', moverCastId: '' });
     }
   }
-  renderContent(); content.scrollTop = 0;
+  renderManageTab(); content.scrollTop = 0;
 }
 
 async function deleteProp(propId) {
@@ -763,6 +772,7 @@ export async function startRunSession(sessionTitle, totalPages) {
 
   // P0: Start periodic Firestore sync
   startSessionSync();
+  updateScriptEditorTab();
 }
 
 /**
@@ -793,6 +803,7 @@ export async function endRunSession(scratchpadText) {
 
   // Null out session BEFORE any UI can re-render
   state.runSession = null;
+  updateScriptEditorTab();
 
   _warnedProps.clear();
 

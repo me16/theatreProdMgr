@@ -103,7 +103,8 @@ function _renderPropsView(page, warnPages) {
   }
 
   const locs = getProductionLocations();
-  const sl = [], on = [], sr = [], other = [];
+  const sl = [], on = [], sr = [];
+  const otherGroups = {}; // keyed by location id
 
   props.forEach(p => {
     const r = getPropStatus(p, page);
@@ -113,8 +114,10 @@ function _renderPropsView(page, warnPages) {
     if (r.status === 'ON') on.push(item);
     else if (resolved.side === 'right') sr.push(item);
     else if (resolved.side === 'left') sl.push(item);
-    else if (resolved.side === 'other') other.push(item);
-    else sl.push(item);
+    else if (resolved.side === 'other') {
+      if (!otherGroups[resolved.id]) otherGroups[resolved.id] = { label: resolved.shortName || resolved.id, items: [] };
+      otherGroups[resolved.id].items.push(item);
+    } else sl.push(item);
   });
 
   const slLabel = locs.find(l => l.side === 'left')?.shortName   || 'BSL';
@@ -140,7 +143,7 @@ function _renderPropsView(page, warnPages) {
   html += col(sl, slLabel);
   html += col(on, onLabel);
   html += col(sr, srLabel);
-  if (other.length) html += col(other, 'OTH');
+  Object.values(otherGroups).forEach(g => { html += col(g.items, g.label); });
   html += '</div>';
   return html;
 }
